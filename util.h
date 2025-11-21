@@ -11,13 +11,15 @@ typedef struct {
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(*a))
 
+size_t string_length(const char* str);
+
 // Pass argv[0] to callingPath.
 // Assumes dest points to a buffer that is atleast PATH_MAX big!
 bool getExecutablePath(const char* callingPath, char* dest);
 
-// Modifies given path, inserts null terminator at last slash
-// returns pointer to first character after last slash, NULL on error (no slash found)
-char* splitPath(char* src);
+// Modifies given 'string', inserts null terminator at last occurence of 'c'.
+// Returns pointer to first character after last occurence of 'c', NULL on error (no 'c' found).
+char* splitAtLastOccurence(char* src, char c);
 
 // NOTE: concatPaths uses 'realpath' internally, which means this only works with actually existing paths!
 // TODO: replace usage of 'realpath' so we can work with any directories (also imaginary trees)!

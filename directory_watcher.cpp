@@ -17,7 +17,23 @@
 #define BUFFER_STRING_AREA_SIZE (128 * 1024)
 #define BUFFER_SIZE (sizeof(DirWatcherEvent) + BUFFER_STRING_AREA_SIZE)
 
-// This function runs in a child process.
+// TODO: exactly this should probably be configurable on DirWatcher init.
+// Or rather: be able to define multiple reactions, each with their own filename/extention conditions
+static bool _shouldTriggerBuild(const char* fileName, const char* extension) {
+    if (extension != NULL && strcmp(extension, "cpp") == 0) {
+        return true;
+    }
+    if (extension != NULL && strcmp(extension, "h") == 0) {
+        return true;
+    }
+    if (fileName != NULL && strcmp(fileName, "Makefile") == 0) {
+        return true;
+    }
+
+    return false;
+}
+
+// NOTE: This function runs in a child process.
 // It gets passed the DirWatcherState (which is copied when forking).
 // Also the allocated buffer inside DirWatcherState is automatically copied when forking.
 static int _DirWatcher_ChildProc(void* arg) {
@@ -29,6 +45,7 @@ static int _DirWatcher_ChildProc(void* arg) {
 
     DirWatcherState* state = (DirWatcherState*)arg;
     close(state->pipe.readFd);
+    state->pipe.readFd = 0;
 
     int wds[DIRWATCHER_MAX_DIRECTORIES];
     for (int i = 0; i < state->config.directoryCount; ++i) {
@@ -38,15 +55,17 @@ static int _DirWatcher_ChildProc(void* arg) {
             fprintf(stderr, "[DirWatcher] Cannot watch '%s': %s\n", path, strerror(errno));
         }
         else {
-            fprintf(stdout, "[DirWatcher] Watching '%s'\n", path);
+            printf("[DirWatcher] Watching '%s'\n", path);
         }
     }
 
     char eventBuffer[4096] __attribute__((aligned(__alignof__(struct inotify_event))));
     while (true) {
+        //usleep(1000);
+        //printf("child reading notify\n");
         ssize_t size = read(notifyFd, eventBuffer, sizeof(eventBuffer));
         if (size == -1 && errno != EAGAIN) {
-            perror("_DirWatcher_ChildProc  read");
+            perror("_DirWatcher_ChildProc  read notifyFd");
             return 1;
         }
 
@@ -58,13 +77,14 @@ static int _DirWatcher_ChildProc(void* arg) {
         DirWatcherEvent* watcherEvent = (DirWatcherEvent*)state->buffer;
         watcherEvent->type = DIRWATCHER_EVENT_FILE_CHANGED;
 
-        // FileChanged event passes a list of char*
+        bool triggerBuild = false;
+
+        // NOTE:FileChanged event passes a list of char*
         // we grow the list from the start of the state buffer
         // and the actual strings from the end of the buffer
         // then we collapse the empty space in the middle
         // and re-calculate the ptrs to relative addressing
         // which is then resolved in PollEvent
-
         const char** firstListEntry = (const char**)(state->buffer + sizeof(DirWatcherEvent));
         watcherEvent->fileChanged.paths = firstListEntry;
         char* top = state->buffer + BUFFER_SIZE;
@@ -87,9 +107,9 @@ static int _DirWatcher_ChildProc(void* arg) {
                         pathPtr = path;
                     }
 
-                    fprintf(stdout, "[DirWatcher] File '%s' changed.\n", pathPtr);
+                    printf("[DirWatcher] File '%s' changed.\n", pathPtr);
 
-                    size_t len = strlen(pathPtr) + 1;
+                    size_t len = string_length(pathPtr) + 1;
                     // TODO: gracefully handle us not having enough space!
                     assert((intptr_t)(top - len) > (intptr_t)(watcherEvent->fileChanged.paths + watcherEvent->fileChanged.count + 1));
                     top -= len;
@@ -97,6 +117,12 @@ static int _DirWatcher_ChildProc(void* arg) {
 
                     watcherEvent->fileChanged.paths[watcherEvent->fileChanged.count] = top;
                     ++watcherEvent->fileChanged.count;
+
+                    char* fileName = splitAtLastOccurence(pathPtr, '/');
+                    const char* extension = splitAtLastOccurence(fileName, '.');
+                    if (_shouldTriggerBuild(fileName, extension)) {
+                        triggerBuild = true;
+                    }
                 }
             }
 
@@ -118,8 +144,54 @@ static int _DirWatcher_ChildProc(void* arg) {
 
         int totalEventSize = sizeof(DirWatcherEvent) + sizeof(char*) * watcherEvent->fileChanged.count + totalStringSize;
         write(state->pipe.writeFd, state->buffer, totalEventSize);
+
+        if (triggerBuild) {
+            memset(state->buffer, 0, BUFFER_SIZE);
+
+            DirWatcherEvent* watcherEvent = (DirWatcherEvent*)state->buffer;
+            watcherEvent->type = DIRWATCHER_EVENT_REACTION_REPORT;
+            char* stringBuffer = state->buffer + sizeof(DirWatcherEvent);
+            watcherEvent->reactionReport.statusMsg = (const char*)sizeof(DirWatcherEvent);
+
+            // TODO: could this pipe could also be created once at initialization?
+            Pipe p;
+            int pipeRet = pipe((int*)&p);
+            if (pipeRet == -1) {
+                perror("_DirWatcher_ChildProc  pipe");
+                continue;
+            }
+
+            int stdoutFd = dup(STDOUT_FILENO);
+            int stderrFd = dup(STDERR_FILENO);
+            // redirect both stdout and stderr to the read end of the pipe
+            dup2(p.writeFd, STDOUT_FILENO);
+            dup2(p.writeFd, STDERR_FILENO);
+            // now we should be able to read from the pipe and get both stdout and stderr
+            watcherEvent->reactionReport.exitStatus = system("make app");
+
+            ssize_t size = read(p.readFd, stringBuffer, BUFFER_STRING_AREA_SIZE);
+            if (size == -1) {
+                perror("_DirWatcher_ChildProc  read pipeReadFd");
+                continue;
+            }
+
+            stringBuffer[size] = '\0';
+            ++size;
+
+            // restore stdout and stderr
+            dup2(stdoutFd, STDOUT_FILENO);
+            dup2(stderrFd, STDERR_FILENO);
+
+            close(p.readFd);
+            close(p.writeFd);
+
+            write(state->pipe.writeFd, state->buffer, sizeof(DirWatcherEvent) + size);
+        }
     }
 
+    // TODO: Is inotify cleanup required?
+
+    printf("[DirWatcher] ChildProc shutting down.\n");
     close(state->pipe.writeFd);
 
     return 0;
@@ -162,6 +234,7 @@ bool DirWatcher_Init(DirWatcherState* state) {
 
     state->initialized = true;
     close(state->pipe.writeFd);
+    state->pipe.writeFd = 0;
 
     return true;
 }
@@ -181,6 +254,7 @@ void DirWatcher_Shutdown(DirWatcherState* state) {
     state->buffer = NULL;
 }
 
+// NOTE: This is called on the parent process.
 bool DirWatcher_PollEvent(DirWatcherState* state, DirWatcherEvent* event) {
     if (!state->initialized) {
         return false;
@@ -193,6 +267,7 @@ bool DirWatcher_PollEvent(DirWatcherState* state, DirWatcherEvent* event) {
     if (size > 0) {
         memcpy(event, state->buffer, sizeof(DirWatcherEvent));
 
+        // NOTE: Here we resolve the relative addresses of our string pointers to actual adresses again.
         switch (event->type) {
         case DIRWATCHER_EVENT_FILE_CHANGED:
         {
@@ -204,8 +279,7 @@ bool DirWatcher_PollEvent(DirWatcherState* state, DirWatcherEvent* event) {
         } break;
         case DIRWATCHER_EVENT_REACTION_REPORT:
         {
-            // TODO
-            //event->reactionReport.statusMsg;
+            event->reactionReport.statusMsg = (const char*)(state->buffer + sizeof(DirWatcherEvent));
         } break;
         }
 

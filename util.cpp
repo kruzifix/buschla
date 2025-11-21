@@ -7,6 +7,15 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdint.h>
+
+size_t string_length(const char* str) {
+    if (str == NULL) {
+        return 0;
+    }
+
+    return strlen(str);
+}
+
 bool getExecutablePath(const char* callingPath, char* dest) {
     // TODO: do actual checking of the path sizes!
     // if callingPath or the concatenation of workingDirector + callingPath is bigger then PATH_MAX,
@@ -33,19 +42,19 @@ bool getExecutablePath(const char* callingPath, char* dest) {
     return realpath(path, dest) != NULL;
 }
 
-char* splitPath(char* src) {
+char* splitAtLastOccurence(char* src, char c) {
     char* p = src;
-    char* lastSlash = NULL;
+    char* lastOccurence = NULL;
     while (*p) {
-        if (*p == '/') {
-            lastSlash = p;
+        if (*p == c) {
+            lastOccurence = p;
         }
         ++p;
     }
 
-    if (lastSlash != NULL) {
-        *lastSlash = '\0';
-        return lastSlash + 1;
+    if (lastOccurence != NULL) {
+        *lastOccurence = '\0';
+        return lastOccurence + 1;
     }
 
     return NULL;
@@ -60,7 +69,7 @@ bool concatPaths_(char* dest, const char* paths[], int count) {
             ++path;
         }
 
-        size_t len = strlen(path);
+        size_t len = string_length(path);
         if (len == 0) {
             continue;
         }

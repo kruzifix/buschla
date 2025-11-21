@@ -162,7 +162,7 @@ int main(int argc, char** argv) {
     bool exePathRet = getExecutablePath(argv[0], exePath);
     assert(exePathRet);
 
-    splitPath(exePath);
+    splitAtLastOccurence(exePath, '/');
 
     DirWatcherState watcherState;
     memset(&watcherState, 0, sizeof(DirWatcherState));
@@ -296,14 +296,15 @@ int main(int argc, char** argv) {
 #ifdef ENABLE_HOT_RELOADING
         // Poll directory watcher events
         DirWatcherEvent watcherEvent;
+        //printf("checking dir watcher. pipeClosed? %d\n", watcherState.pipeClosed);
         while (DirWatcher_PollEvent(&watcherState, &watcherEvent)) {
             if (watcherEvent.type == DIRWATCHER_EVENT_FILE_CHANGED) {
                 for (int i = 0; i < watcherEvent.fileChanged.count; ++i) {
-                    printf("file changed: %s\n", watcherEvent.fileChanged.paths[i]);
+                    printf("[BUSCHLA] file changed: %s\n", watcherEvent.fileChanged.paths[i]);
                 }
             }
             if (watcherEvent.type == DIRWATCHER_EVENT_REACTION_REPORT) {
-                printf("reaction finished with code %d and msg: %s\n",
+                printf("[BUSCHLA] reaction finished with code %d and msg:\n%s\n",
                     watcherEvent.reactionReport.exitStatus,
                     watcherEvent.reactionReport.statusMsg);
             }
@@ -318,8 +319,6 @@ int main(int argc, char** argv) {
         ImGui_ImplSDLGPU3_NewFrame();
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
-
-        // TODO: Query source files, if something changed => trigger build => if succeded, reload library!
 
         if (app_main != NULL) {
             //gui();
