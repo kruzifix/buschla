@@ -3,6 +3,13 @@
 # Log Analyzer
 # ------------------
 
+## Hot Reloading for development
+- on startup create child process
+- in child proc: create file/directory watcher with inotify
+- on file write, notify parent and run make
+- on make exit: send success or failure to parent proc with pipe
+- parent then either displays failure or attempts to reload library
+
 
 #### Rebuild shader for imgui
 The shader for imgui is embedded as SPIR-V in the source code.
