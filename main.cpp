@@ -23,7 +23,7 @@
 
 // TODO: How can we also build this to statically link the app layer?
 // because we need the code hot reloading really only for dev on linux
-typedef void (app_main_func)(AppState& state);
+typedef void (app_main_func)(AppState* state);
 
 static SDL_FColor clear_color{ .1f, .1f, .1f, 1.f };
 
@@ -184,6 +184,8 @@ int main(int argc, char** argv) {
 
     AppState state;
     state.context = ImGui::GetCurrentContext();
+    state.stateMemory = NULL;
+    state.stateMemorySize = 0;
 
     bool done = false;
     while (!done) {
@@ -261,7 +263,7 @@ int main(int argc, char** argv) {
 
 #ifdef ENABLE_HOT_RELOADING
         if (appLibrary.app_main != NULL) {
-            appLibrary.app_main(state);
+            appLibrary.app_main(&state);
         }
 #else
 #error "If we are not hot reloading, we should statically link app_main!"
@@ -296,6 +298,10 @@ int main(int argc, char** argv) {
         }
 
         SDL_SubmitGPUCommandBuffer(command_buffer);
+    }
+
+    if (state.stateMemory != NULL) {
+        free(state.stateMemory);
     }
 
 #ifdef ENABLE_HOT_RELOADING

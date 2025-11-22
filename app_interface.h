@@ -5,4 +5,6 @@
 struct AppState
 {
     ImGuiContext* context;
+    void* stateMemory;
+    size_t stateMemorySize;
 };

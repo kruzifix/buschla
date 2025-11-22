@@ -1,7 +1,21 @@
 #include "app_interface.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+
 #define SPLITTER_SIZE 10.f
 #define SPLIT_MIN_CONTENT_SIZE 100.f
+
+// NOTE: The memory for the state is automatically allocated.
+// To ensure compatibility between States when hot-reloading,
+// ONLY EVER add stuff to the end of this struct (it is allowed to grow).
+// IF you need to re-arrange members, then you must restart the whole program!
+// If stuff is added at the end, it is zero initialized!
+typedef struct {
+    float xSplit;
+    float ySplitLeft;
+    float ySplitRight;
+} State;
 
 static inline float clampf(float value, float min, float max) {
     if (value < min) return min;
@@ -28,7 +42,7 @@ static void splitter(const char* label, float& splitValue, bool horizontal) {
     }
 }
 
-static void gui() {
+static void gui(State* state) {
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
             // ShowExampleMenuFile();
@@ -68,19 +82,15 @@ static void gui() {
 
     bool open = true;
     if (ImGui::Begin("Fullscreen Window", &open, flags)) {
-        static float xSplit = -1.f;
-        static float ySplitLeft = -1.f;
-        static float ySplitRight = -1.f;
-
         ImVec2 windowSize = ImGui::GetWindowSize();
-        if (xSplit < 0.f) {
-            xSplit = windowSize.x - 300.f;
+        if (state->xSplit <= 0.f) {
+            state->xSplit = windowSize.x - 300.f;
         }
-        if (ySplitLeft < 0.f) {
-            ySplitLeft = windowSize.y * .5f;
+        if (state->ySplitLeft <= 0.f) {
+            state->ySplitLeft = windowSize.y * .5f;
         }
-        if (ySplitRight < 0.f) {
-            ySplitRight = windowSize.y * .5f;
+        if (state->ySplitRight <= 0.f) {
+            state->ySplitRight = windowSize.y * .5f;
         }
 
 #define STYLE_VAR(name, value)                \
@@ -98,34 +108,34 @@ static void gui() {
         STYLE_VAR2(ImGuiStyleVar_ItemSpacing, 0.f, 0.f);
         STYLE_VAR(ImGuiStyleVar_ChildBorderSize, 0.f);
 
-        ImGui::BeginChild("region_left", ImVec2(xSplit, 0.f), ImGuiChildFlags_Borders);
+        ImGui::BeginChild("region_left", ImVec2(state->xSplit, 0.f), ImGuiChildFlags_Borders);
 
-        ImGui::BeginChild("region_left_top", ImVec2(xSplit, ySplitLeft));
+        ImGui::BeginChild("region_left_top", ImVec2(state->xSplit, state->ySplitLeft));
         // TODO: Inside the regions we do probably want ItemSpacing!!!
         ImGui::Text("Top Left");
 
         ImGui::EndChild();
 
-        splitter("##region_left_splitter_v", ySplitLeft, false);
+        splitter("##region_left_splitter_v", state->ySplitLeft, false);
 
-        ImGui::BeginChild("region_left_bot", ImVec2(xSplit, 0));
+        ImGui::BeginChild("region_left_bot", ImVec2(state->xSplit, 0));
         ImGui::Text("Bot Left");
         ImGui::EndChild();
 
         ImGui::EndChild();
 
         ImGui::SameLine();
-        splitter("##region_splitter_h", xSplit, true);
+        splitter("##region_splitter_h", state->xSplit, true);
 
         ImGui::SameLine();
 
         ImGui::BeginChild("region_right", ImVec2(0.f, 0.f), ImGuiChildFlags_Borders);
 
-        ImGui::BeginChild("region_right_top", ImVec2(0, ySplitRight));
+        ImGui::BeginChild("region_right_top", ImVec2(0, state->ySplitRight));
         ImGui::Text("Top Right");
         ImGui::EndChild();
 
-        splitter("##region_right_splitter_v", ySplitRight, false);
+        splitter("##region_right_splitter_v", state->ySplitRight, false);
 
         ImGui::BeginChild("region_right_bot", ImVec2(0, 0));
         ImGui::Text("Bot Right");
@@ -139,9 +149,35 @@ static void gui() {
     // ImGui::ShowDemoWindow(&open);
 }
 
-extern "C" void app_main(AppState& state)
-{
-    ImGui::SetCurrentContext(state.context);
+static State* getStateMemory(AppState* state) {
+    size_t stateSize = sizeof(State);
+    // this means we are right after startup
+    if (state->stateMemory == NULL) {
+        state->stateMemory = malloc(stateSize);
+        state->stateMemorySize = stateSize;
+        printf("[APP] No state memory, allocating %ld.\n", stateSize);
+    }
+    // this means we hot-reloading and added something to the State struct
+    else if (stateSize > state->stateMemorySize) {
+        printf("[APP] More state memory required, allocating %ld (was %ld).\n", stateSize, state->stateMemorySize);
 
-    gui();
+        void* newMemory = malloc(stateSize);
+        memset(newMemory, 0, stateSize);
+        // copy over old contents
+        memcpy(newMemory, state->stateMemory, state->stateMemorySize);
+
+        free(state->stateMemory);
+        state->stateMemory = newMemory;
+        state->stateMemorySize = stateSize;
+    }
+
+    return (State*)state->stateMemory;
+}
+
+extern "C" void app_main(AppState* appState) {
+    State* state = getStateMemory(appState);
+
+    ImGui::SetCurrentContext(appState->context);
+
+    gui(state);
 }
