@@ -30,6 +30,7 @@ EXE = $(BUILD_DIR)/buschla
 
 .PHONY: all
 all: $(EXE) $(APP_LIB)
+	cp DroidSansMono.ttf $(BUILD_DIR)/font.ttf
 	@echo Finished building BUSCHLA!
 
 .PHONY: app
@@ -101,8 +102,8 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 .PHONY: run
-run: $(EXE) $(APP_LIB)
-	./$(EXE)
+run: all
+	$(EXE)
 
 .PHONY: clean
 clean:

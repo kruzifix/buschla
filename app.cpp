@@ -1,7 +1,10 @@
 #include "app_interface.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+#include "imgui/imgui_internal.h"
 
 #define SPLITTER_SIZE 10.f
 #define SPLIT_MIN_CONTENT_SIZE 100.f
@@ -16,12 +19,6 @@ typedef struct {
     float ySplitLeft;
     float ySplitRight;
 } State;
-
-static inline float clampf(float value, float min, float max) {
-    if (value < min) return min;
-    if (value > max) return max;
-    return value;
-}
 
 // TODO: RIGHT CLICK => reset split!
 static void splitter(const char* label, float& splitValue, bool horizontal) {
@@ -38,7 +35,7 @@ static void splitter(const char* label, float& splitValue, bool horizontal) {
 
     if (active) {
         int axisIndex = horizontal ? 0 : 1;
-        splitValue = clampf(splitValue + ImGui::GetIO().MouseDelta[axisIndex], SPLIT_MIN_CONTENT_SIZE, windowSize[axisIndex] - SPLIT_MIN_CONTENT_SIZE);
+        splitValue = ImClamp(splitValue + ImGui::GetIO().MouseDelta[axisIndex], SPLIT_MIN_CONTENT_SIZE, windowSize[axisIndex] - SPLIT_MIN_CONTENT_SIZE);
     }
 }
 
@@ -70,7 +67,8 @@ static void gui(State* state) {
     static ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration |
         ImGuiWindowFlags_NoMove |
         ImGuiWindowFlags_NoSavedSettings |
-        ImGuiWindowFlags_NoBackground;
+        ImGuiWindowFlags_NoBackground |
+        ImGuiWindowFlags_NoBringToFrontOnFocus;
 
     // We demonstrate using the full viewport area or the work area (without menu-bars, task-bars etc.)
     // Based on your use case you may want one or the other.
@@ -83,6 +81,7 @@ static void gui(State* state) {
     bool open = true;
     if (ImGui::Begin("Fullscreen Window", &open, flags)) {
         ImVec2 windowSize = ImGui::GetWindowSize();
+        // TODO: This does not seem to be working ...
         if (state->xSplit <= 0.f) {
             state->xSplit = windowSize.x - 300.f;
         }
@@ -133,6 +132,7 @@ static void gui(State* state) {
 
         ImGui::BeginChild("region_right_top", ImVec2(0, state->ySplitRight));
         ImGui::Text("Top Right");
+
         ImGui::EndChild();
 
         splitter("##region_right_splitter_v", state->ySplitRight, false);
@@ -145,8 +145,6 @@ static void gui(State* state) {
         ImGui::PopStyleVar(styleVars);
     }
     ImGui::End();
-
-    // ImGui::ShowDemoWindow(&open);
 }
 
 static State* getStateMemory(AppState* state) {
@@ -180,4 +178,6 @@ extern "C" void app_main(AppState* appState) {
     ImGui::SetCurrentContext(appState->context);
 
     gui(state);
+
+    // ImGui::ShowStyleEditor();
 }

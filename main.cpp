@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/sendfile.h>
@@ -16,6 +17,7 @@
 #include "directory_watcher.h"
 #include "util.h"
 #include "imgui/imgui.h"
+#include "imgui/imgui_internal.h"
 #include "imgui/imgui_impl_sdl3.h"
 #include "imgui/imgui_impl_sdlgpu3.h"
 
@@ -58,6 +60,165 @@ static void unloadAppLibrary(AppLibraryState* state) {
         state->handle = NULL;
         state->app_main = NULL;
     }
+}
+
+typedef struct {
+    bool targetState;
+    float t;
+    float timeVisible;
+    bool autoClose;
+
+    bool success;
+    // NOTE: this points to a strdup-ed string and is freed on re-trigger
+    // TODO: allocate buffer once?
+    char* msg;
+} HotReloadStatusWindow;
+
+HotReloadStatusWindow hotReloadStatusWindow;
+
+static inline float easeOutBack(float x) {
+    static float c1 = 1.70158;
+    static float c3 = c1 + 1;
+
+    return 1.f + c3 * powf(x - 1.f, 3.f) + c1 * powf(x - 1.f, 2.f);
+}
+
+static void triggerHotReloadStatus(bool success, const char* msg) {
+    hotReloadStatusWindow.targetState = true;
+    hotReloadStatusWindow.t = 0.f;
+    hotReloadStatusWindow.timeVisible = 0.f;
+
+    hotReloadStatusWindow.success = success;
+    hotReloadStatusWindow.autoClose = success;
+    if (hotReloadStatusWindow.msg != NULL) {
+        free(hotReloadStatusWindow.msg);
+    }
+    hotReloadStatusWindow.msg = strdup(msg);
+}
+
+static void drawHotReloadStatusWindow() {
+    ImGui::SetNextWindowPos(ImVec2(100, 100));
+    ImGui::Begin("asdlfkjwlekjf");
+    ImGui::Text("targetState: %d", hotReloadStatusWindow.targetState);
+    ImGui::Text("t: %.3f", hotReloadStatusWindow.t);
+    ImGui::Text("timeVisible: %.3f", hotReloadStatusWindow.timeVisible);
+    ImGui::Text("success: %d", hotReloadStatusWindow.success);
+    ImGui::Text("msg: %p", hotReloadStatusWindow.msg);
+    ImGui::End();
+
+    const float animationDuration = .6f;
+    const float fullyEasedInThreshold = .95f;
+    static float lastTime = -1.f;
+
+    float time = ImGui::GetTime();
+    if (lastTime < 0.f) {
+        lastTime = time;
+    }
+
+    float dt = time - lastTime;
+    lastTime = time;
+
+    if (hotReloadStatusWindow.t < .05f &&
+        !hotReloadStatusWindow.targetState) {
+        return;
+    }
+
+    float delta = dt / animationDuration * (hotReloadStatusWindow.targetState ? 1.f : -1.f);
+    bool lastEasedIn = hotReloadStatusWindow.t > fullyEasedInThreshold;
+    hotReloadStatusWindow.t = ImClamp(hotReloadStatusWindow.t + delta, 0.f, 1.f);
+    bool easedIn = hotReloadStatusWindow.t > fullyEasedInThreshold;
+
+    if (!lastEasedIn && easedIn) {
+        hotReloadStatusWindow.timeVisible = 0.f;
+    }
+
+    if (easedIn) {
+        hotReloadStatusWindow.timeVisible += dt;
+    }
+
+    if (hotReloadStatusWindow.autoClose &&
+        hotReloadStatusWindow.targetState &&
+        hotReloadStatusWindow.timeVisible > 3.f) {
+        hotReloadStatusWindow.targetState = false;
+    }
+
+    float tEased = easeOutBack(hotReloadStatusWindow.t);
+
+    ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImVec2 size = viewport->Size;
+    size.x *= .5f;
+    size.y *= .3f;
+    ImVec2 pos = ImVec2(size.x, 35.f + 300.f * (tEased - 1.f));
+    ImGui::SetNextWindowPos(pos, 0, ImVec2(.5f, 0.f));
+    //ImGui::SetNextWindowSizeConstraints(ImVec2(0.f, 0.f), ImVec2())
+
+    static ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration |
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_AlwaysAutoResize;
+    ImGui::PushStyleColor(ImGuiCol_Border, (ImVec4)ImColor::HSV((hotReloadStatusWindow.success ? 90.f : 2.f) / 360.f, .83f, .63f, .8f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.f, 8.f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8.f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 4.f);
+    ImGui::Begin("hotReloadStatusWindow", NULL, flags);
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        if (ImGui::IsWindowHovered()) {
+            hotReloadStatusWindow.targetState = false;
+        }
+    }
+
+    ImGui::SeparatorText(hotReloadStatusWindow.success ? "HOT-Reload Succeeded!" : "HOT-RELOAD Failed!");
+
+    const char* lineStart = hotReloadStatusWindow.msg;
+    const char* p = lineStart;
+    // TODO: omg, doing this each frames ... I feel my ancestors turning around in their graves ...
+    while (*p != '\0') {
+        bool startsWithMake = strncmp(p, "make[", 5) == 0;
+        bool startsWithCompiler = strncmp(p, "g++ ", 4) == 0;
+
+        if (strncmp(p, "./build/../", 11) == 0) {
+            lineStart += 11;
+            p += 11;
+        }
+
+        bool isError = false;
+        bool isWarning = false;
+        bool isNote = false;
+        while (*p != '\n' && *p != '\0') {
+            if (strncmp(p, "error:", 6) == 0) {
+                isError = true;
+            }
+            if (strncmp(p, "warning:", 8) == 0) {
+                isWarning = true;
+            }
+            if (strncmp(p, "note:", 5) == 0) {
+                isNote = true;
+            }
+            ++p;
+        }
+        if (!startsWithMake && !startsWithCompiler) {
+            int lineLength = (int)(p - lineStart);
+            if (isWarning || isError || isNote) {
+                // TODO: kind hacky, but works :shrug:
+                hotReloadStatusWindow.autoClose = false;
+                float h = isError ? 4.f : (isWarning ? 55.f : 88.f);
+                ImVec4 col = (ImVec4)ImColor::HSV(h / 360.f, .83f, .83f);
+                ImGui::TextColored(col, "%*.*s", lineLength, lineLength, lineStart);
+            }
+            else {
+                ImGui::Text("%*.*s", lineLength, lineLength, lineStart);
+            }
+        }
+        if (*p == '\0') {
+            break;
+        }
+        lineStart = p + 1;
+        p = lineStart;
+    }
+
+    ImGui::End();
+    ImGui::PopStyleVar(3);
+    ImGui::PopStyleColor();
 }
 #endif
 
@@ -119,15 +280,19 @@ int main(int argc, char** argv) {
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    // ImGuiIO &io = ImGui::GetIO();
+    ImGuiIO& io = ImGui::GetIO();
     // io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     //  io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
     ImGui::StyleColorsDark();
 
     ImGuiStyle& style = ImGui::GetStyle();
+    main_scale *= 1.1f;
     style.ScaleAllSizes(main_scale); // Bake a fixed style scale. (until we have a solution for dynamic style scaling, changing this requires resetting Style + calling this again)
     style.FontScaleDpi = main_scale; // Set initial font scale. (using io.ConfigDpiScaleFonts=true makes this unnecessary. We leave both here for documentation purpose)
+
+    style.WindowBorderSize = 0.f;
+    style.Colors[ImGuiCol_Text] = ImVec4(.8f, .8f, .8f, 1.f);
 
     ImGui_ImplSDL3_InitForSDLGPU(window);
     ImGui_ImplSDLGPU3_InitInfo init_info = {};
@@ -138,21 +303,10 @@ int main(int argc, char** argv) {
     init_info.PresentMode = SDL_GPU_PRESENTMODE_VSYNC;
     ImGui_ImplSDLGPU3_Init(&init_info);
 
-    // Load Fonts
-    // - If no fonts are loaded, dear imgui will use the default font. You can also load multiple fonts and use ImGui::PushFont()/PopFont() to select them.
-    // - AddFontFromFileTTF() will return the ImFont* so you can store it if you need to select the font among multiple.
-    // - If the file cannot be loaded, the function will return a nullptr. Please handle those errors in your application (e.g. use an assertion, or display an error and quit).
-    // - Use '#define IMGUI_ENABLE_FREETYPE' in your imconfig file to use Freetype for higher quality font rendering.
-    // - Read 'docs/FONTS.md' for more instructions and details. If you like the default font but want it to scale better, consider using the 'ProggyVector' from the same author!
-    // - Remember that in C/C++ if you want to include a backslash \ in a string literal you need to write a double backslash \\ !
-    // style.FontSizeBase = 20.0f;
-    // io.Fonts->AddFontDefault();
-    // io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\segoeui.ttf");
-    // io.Fonts->AddFontFromFileTTF("../../misc/fonts/DroidSans.ttf");
-    // io.Fonts->AddFontFromFileTTF("../../misc/fonts/Roboto-Medium.ttf");
-    // io.Fonts->AddFontFromFileTTF("../../misc/fonts/Cousine-Regular.ttf");
-    // ImFont* font = io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\ArialUni.ttf");
-    // IM_ASSERT(font != nullptr);
+    char fontPath[PATH_MAX];
+    concatPaths(fontPath, exePath, "/font.ttf");
+    ImFont* font = io.Fonts->AddFontFromFileTTF(fontPath);
+    IM_ASSERT(font != NULL);
 
 #ifdef ENABLE_HOT_RELOADING
     char tmpPath[PATH_MAX];
@@ -241,12 +395,16 @@ int main(int argc, char** argv) {
 
                         memcpy(tmpLibraryPath, newTmpLibraryPath, sizeof(tmpLibraryPath));
 
-                        // TODO: display notification?
+                        triggerHotReloadStatus(true, watcherEvent.reactionReport.statusMsg);
                     }
                     else {
-                        fprintf(stderr, "%s\n", dlerror());
-                        // TODO: display notification?
+                        char* errorString = dlerror();
+                        fprintf(stderr, "%s\n", errorString);
+                        triggerHotReloadStatus(false, errorString);
                     }
+                }
+                else {
+                    triggerHotReloadStatus(false, watcherEvent.reactionReport.statusMsg);
                 }
             }
         }
@@ -260,15 +418,20 @@ int main(int argc, char** argv) {
         ImGui_ImplSDLGPU3_NewFrame();
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
+        //ImGui::PushFont(font, 0.f);
 
 #ifdef ENABLE_HOT_RELOADING
         if (appLibrary.app_main != NULL) {
             appLibrary.app_main(&state);
         }
+
+        drawHotReloadStatusWindow();
+
 #else
 #error "If we are not hot reloading, we should statically link app_main!"
 #endif
 
+        //ImGui::PopFont();
         ImGui::Render();
         ImDrawData* draw_data = ImGui::GetDrawData();
         const bool is_minimized = (draw_data->DisplaySize.x <= 0.0f || draw_data->DisplaySize.y <= 0.0f);
@@ -305,6 +468,10 @@ int main(int argc, char** argv) {
     }
 
 #ifdef ENABLE_HOT_RELOADING
+    if (hotReloadStatusWindow.msg != NULL) {
+        free(hotReloadStatusWindow.msg);
+    }
+
     unloadAppLibrary(&appLibrary);
 
     DirWatcher_Shutdown(&watcherState);
