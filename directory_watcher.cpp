@@ -109,7 +109,7 @@ static int _DirWatcher_ChildProc(void* arg) {
 
                     printf("[DirWatcher] File '%s' changed.\n", pathPtr);
 
-                    size_t len = string_length(pathPtr) + 1;
+                    size_t len = getStringLength(pathPtr) + 1;
                     // TODO: gracefully handle us not having enough space!
                     assert((intptr_t)(top - len) > (intptr_t)(watcherEvent->fileChanged.paths + watcherEvent->fileChanged.count + 1));
                     top -= len;

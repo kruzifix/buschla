@@ -8,7 +8,7 @@
 #include <unistd.h>
 #include <stdint.h>
 
-size_t string_length(const char* str) {
+size_t getStringLength(const char* str) {
     if (str == NULL) {
         return 0;
     }
@@ -28,12 +28,12 @@ bool getExecutablePath(const char* callingPath, char* dest) {
     // the callingPath in argv can be
     // - absolute (start with /)
     // - relative (start with ./ or ../)
+    // - relative? (starts without .)
     char path[PATH_MAX];
     if (callingPath[0] == '/') {
         strcpy(path, callingPath);
     }
     else {
-        assert(callingPath[0] == '.');
         strcpy(path, workingDirectory);
         strcat(path, "/");
         strcat(path, callingPath);
@@ -69,7 +69,7 @@ bool concatPaths_(char* dest, const char* paths[], int count) {
             ++path;
         }
 
-        size_t len = string_length(path);
+        size_t len = getStringLength(path);
         if (len == 0) {
             continue;
         }

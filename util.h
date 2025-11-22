@@ -11,7 +11,7 @@ typedef struct {
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(*a))
 
-size_t string_length(const char* str);
+size_t getStringLength(const char* str);
 
 // Pass argv[0] to callingPath.
 // Assumes dest points to a buffer that is atleast PATH_MAX big!

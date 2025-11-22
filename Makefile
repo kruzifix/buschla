@@ -37,6 +37,8 @@ LIBS = -ldl `pkg-config sdl3 --libs`
 ## BUILD RULES
 ##---------------------------------------------------------------------
 
+# TODO: Is a unity build for the main app and the hot reloadable code better?
+
 ## Main executable
 
 all: $(BUILD_DIR)/$(EXE) $(BUILD_DIR)/$(APP_SO)

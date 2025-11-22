@@ -1,10 +1,14 @@
 // Skeleton taken from imgui sdl3_sdlgpu3 example
 
 #include <dlfcn.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/sendfile.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <SDL3/SDL.h>
 
@@ -156,6 +160,40 @@ void gui() {
     // ImGui::ShowDemoWindow(&open);
 }
 
+#ifdef ENABLE_HOT_RELOADING
+typedef struct {
+    void* handle;
+    app_main_func* app_main;
+} AppLibraryState;
+
+// Returns false on error, check dlerror() for reason.
+static bool tryLoadAppLibrary(const char* path, AppLibraryState* state) {
+    void* handle = dlopen(path, RTLD_NOW);
+    if (handle == NULL) {
+        return false;
+    }
+
+    app_main_func* app_main = (app_main_func*)dlsym(handle, "app_main");
+    if (app_main == NULL) {
+        dlclose(handle);
+        return false;
+    }
+
+    state->handle = handle;
+    state->app_main = app_main;
+    return true;
+}
+
+static void unloadAppLibrary(AppLibraryState* state) {
+    if (state->handle != NULL) {
+        dlclose(state->handle);
+
+        state->handle = NULL;
+        state->app_main = NULL;
+    }
+}
+#endif
+
 int main(int argc, char** argv) {
 #ifdef ENABLE_HOT_RELOADING
     char exePath[PATH_MAX];
@@ -173,7 +211,7 @@ int main(int argc, char** argv) {
         "../imgui",
     };
     char watcherPath[PATH_MAX];
-    for (int i = 0; i < ARRAY_SIZE(watchPaths); ++i) {
+    for (size_t i = 0; i < ARRAY_SIZE(watchPaths); ++i) {
         concatPaths(watcherPath, exePath, watchPaths[i]);
         DirWatcherConfig_AppendDirectory(&watcherState.config, watcherPath);
     }
@@ -249,30 +287,33 @@ int main(int argc, char** argv) {
     // ImFont* font = io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\ArialUni.ttf");
     // IM_ASSERT(font != nullptr);
 
+#ifdef ENABLE_HOT_RELOADING
+    char tmpPath[PATH_MAX];
+    concatPaths(tmpPath, exePath, "/tmp");
 
-    // TODO: We probably want the following prodcedure:
-    // 1. Copy app.so to a temp file
-    // 2. Then load&use that
-    // Because when we rebuild app.so, it can't be open by the main proc!
-    // ====> Maybe this is only a windows problem, we seem to be able to write to app.so, while we have it open!
+    char cmdBuffer[PATH_MAX];
+    snprintf(cmdBuffer, sizeof(cmdBuffer), "rm -rf %s", tmpPath);
+    system(cmdBuffer);
+    snprintf(cmdBuffer, sizeof(cmdBuffer), "mkdir %s", tmpPath);
+    system(cmdBuffer);
 
-    // TODO: build absolute path to library! (else you have to start the app from its directory which is stupid)
-    // OR: we also try to open it in the build sub folder and use whatever is available
-    const char* appLibraryPath = "./build/app.so";
-    void* appHandle = dlopen(appLibraryPath, RTLD_NOW);
-    if (appHandle == NULL) {
+    char appLibraryPath[PATH_MAX];
+    concatPaths(appLibraryPath, exePath, "app.so");
+
+    int tmpLibraryId = 0;
+
+    char tmpLibraryPath[PATH_MAX];
+    snprintf(tmpLibraryPath, sizeof(tmpLibraryPath), "%s/tmp%04d", tmpPath, tmpLibraryId);
+
+    snprintf(cmdBuffer, sizeof(cmdBuffer), "cp %s %s", appLibraryPath, tmpLibraryPath);
+    system(cmdBuffer);
+
+    AppLibraryState appLibrary;
+    if (!tryLoadAppLibrary(tmpLibraryPath, &appLibrary)) {
         fprintf(stderr, "%s\n", dlerror());
         exit(1);
     }
-
-    app_main_func* app_main = NULL;
-    if (appHandle != NULL) {
-        app_main = (app_main_func*)dlsym(appHandle, "app_main");
-        if (app_main == NULL) {
-            fprintf(stderr, "%s\n", dlerror());
-            exit(2);
-        }
-    }
+#endif
 
     AppState state;
     state.context = ImGui::GetCurrentContext();
@@ -296,7 +337,6 @@ int main(int argc, char** argv) {
 #ifdef ENABLE_HOT_RELOADING
         // Poll directory watcher events
         DirWatcherEvent watcherEvent;
-        //printf("checking dir watcher. pipeClosed? %d\n", watcherState.pipeClosed);
         while (DirWatcher_PollEvent(&watcherState, &watcherEvent)) {
             if (watcherEvent.type == DIRWATCHER_EVENT_FILE_CHANGED) {
                 for (int i = 0; i < watcherEvent.fileChanged.count; ++i) {
@@ -307,6 +347,33 @@ int main(int argc, char** argv) {
                 printf("[BUSCHLA] reaction finished with code %d and msg:\n%s\n",
                     watcherEvent.reactionReport.exitStatus,
                     watcherEvent.reactionReport.statusMsg);
+
+                // TODO: should we check the modified date of the app.so to determine if we should really reload?
+                if (watcherEvent.reactionReport.exitStatus == 0) {
+                    // copy app.so to tmp location
+                    // load new tmp library
+                    // if it succeeded => replace app_main, unload old library and cleanup?
+
+                    ++tmpLibraryId;
+                    char newTmpLibraryPath[PATH_MAX];
+                    snprintf(newTmpLibraryPath, sizeof(newTmpLibraryPath), "%s/tmp%04d", tmpPath, tmpLibraryId);
+
+                    snprintf(cmdBuffer, sizeof(cmdBuffer), "cp %s %s", appLibraryPath, newTmpLibraryPath);
+                    // TODO: check exit status!
+                    system(cmdBuffer);
+
+                    AppLibraryState newAppLibrary;
+                    if (tryLoadAppLibrary(newTmpLibraryPath, &newAppLibrary)) {
+                        unloadAppLibrary(&appLibrary);
+                        // TODO: should we delete the old tmp library here?
+                        appLibrary.handle = newAppLibrary.handle;
+                        appLibrary.app_main = newAppLibrary.app_main;
+                        printf("Successfully replaced app library!\n");
+                    }
+                    else {
+                        fprintf(stderr, "%s\n", dlerror());
+                    }
+                }
             }
         }
 #endif
@@ -320,10 +387,13 @@ int main(int argc, char** argv) {
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
 
-        if (app_main != NULL) {
-            //gui();
-            app_main(state);
+#ifdef ENABLE_HOT_RELOADING
+        if (appLibrary.app_main != NULL) {
+            appLibrary.app_main(state);
         }
+#else
+#error "If we are not hot reloading, we should statically link app_main!"
+#endif
 
         ImGui::Render();
         ImDrawData* draw_data = ImGui::GetDrawData();
@@ -357,7 +427,10 @@ int main(int argc, char** argv) {
     }
 
 #ifdef ENABLE_HOT_RELOADING
+    unloadAppLibrary(&appLibrary);
+
     DirWatcher_Shutdown(&watcherState);
+    // TODO: cleanup tmp directory!
 #endif
 
     SDL_WaitForGPUIdle(gpu_device);
