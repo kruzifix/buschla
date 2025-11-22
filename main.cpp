@@ -16,8 +16,8 @@
 #include "directory_watcher.h"
 #include "util.h"
 #include "imgui/imgui.h"
-#include "imgui_impl_sdl3.h"
-#include "imgui_impl_sdlgpu3.h"
+#include "imgui/imgui_impl_sdl3.h"
+#include "imgui/imgui_impl_sdlgpu3.h"
 
 #define ENABLE_HOT_RELOADING
 

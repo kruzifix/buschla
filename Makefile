@@ -2,78 +2,107 @@
 # SDL3-devel package needs to be installed
 # For Windows build see build_win64.bat
 
-#CXX = g++
-#CXX = clang++
+COMPILER = g++
+#COMPILER = clang++
 
-EXE = buschla
-APP_SO = app.so
-IMGUI_DIR = imgui
-BUILD_DIR = build
+CFLAGS =  -std=c++11
+CFLAGS += -ggdb
+CFLAGS += -Wall
+#CFLAGS += -Wformat
+CFLAGS += `pkg-config sdl3 --cflags`
 
-SOURCES = main.cpp
-SOURCES += util.cpp
-SOURCES += directory_watcher.cpp
+LDFLAGS =  -ldl
+LDFLAGS += `pkg-config sdl3 --libs`
 
-SOURCES += $(IMGUI_DIR)/imgui.cpp
-SOURCES += $(IMGUI_DIR)/imgui_demo.cpp
-SOURCES += $(IMGUI_DIR)/imgui_draw.cpp
-SOURCES += $(IMGUI_DIR)/imgui_tables.cpp
-SOURCES += $(IMGUI_DIR)/imgui_widgets.cpp
+COMPILE = $(COMPILER) $(CFLAGS) -c
+LINK = $(COMPILER) $(LDFLAGS)
 
-SOURCES += $(IMGUI_DIR)/imgui_impl_sdl3.cpp
-SOURCES += $(IMGUI_DIR)/imgui_impl_sdlgpu3.cpp
+## ----------------------------- ##
 
-OBJS = $(addprefix $(BUILD_DIR)/,$(addsuffix .o, $(basename $(notdir $(SOURCES)))))
+BUILD_DIR = ./build
+IMGUI_DIR = ./imgui
 
-APP_SOURCES = app.cpp
-APP_OBJS = $(addprefix $(BUILD_DIR)/,$(addsuffix .o, $(basename $(notdir $(APP_SOURCES)))))
+APP_LIB = $(BUILD_DIR)/app.so
 
-CXXFLAGS = -std=c++11 -I$(IMGUI_DIR)
-CXXFLAGS += -g -ggdb -Wall -Wformat# -pedantic
-CXXFLAGS += `pkg-config sdl3 --cflags`
-LIBS = -ldl `pkg-config sdl3 --libs`
+## ----------------------------- ##
 
-##---------------------------------------------------------------------
-## BUILD RULES
-##---------------------------------------------------------------------
+EXE = $(BUILD_DIR)/buschla
 
-# TODO: Is a unity build for the main app and the hot reloadable code better?
+.PHONY: all
+all: $(EXE) $(APP_LIB)
+	@echo Finished building BUSCHLA!
 
-## Main executable
+.PHONY: app
+app: $(APP_LIB)
+	@echo Finished building app library!
 
-all: $(BUILD_DIR)/$(EXE) $(BUILD_DIR)/$(APP_SO)
-	@echo Done building $(EXE) and $(APP_SO).
+## ----------------------------- ##
 
-# Link executable
-$(BUILD_DIR)/$(EXE): $(OBJS)
-	$(CXX) -rdynamic -o $@ $^ $(CXXFLAGS) $(LIBS)
+# all *.cpp files in imgui folder
+IMGUI_SRC_FILES = $(wildcard $(IMGUI_DIR)/*.cpp)
+IMGUI_SRC_UNITY = $(BUILD_DIR)/unity_imgui.cpp
+IMGUI_OBJ = $(BUILD_DIR)/imgui.o
 
-# Build source files to .o
-$(BUILD_DIR)/%.o: %.cpp
-	mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+# build imgui .o file
+$(IMGUI_OBJ): $(IMGUI_SRC_UNITY)
+	$(COMPILE) -fPIC -o $(IMGUI_OBJ) $(IMGUI_SRC_UNITY)
 
-# Build imgui source files to .o
-$(BUILD_DIR)/%.o: $(IMGUI_DIR)/%.cpp
-	mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+# compose imgui unity source file
+$(IMGUI_SRC_UNITY): $(IMGUI_SRC_FILES) $(BUILD_DIR)
+	@echo -e $(IMGUI_SRC_FILES:%='\n#include "../%"') > $(IMGUI_SRC_UNITY)
 
-## Dynamic library
+## ----------------------------- ##
 
-app: $(BUILD_DIR)/$(APP_SO)
-	@echo Done building $(APP_SO).
+EXE_SRC =  util
+EXE_SRC += directory_watcher
+EXE_SRC += main
 
-# Link dynamic library
-$(BUILD_DIR)/$(APP_SO): $(APP_OBJS)
-	$(CXX) -shared -o $@ $^ $(CXXFLAGS) $(LIBS)
+EXE_SRC_UNITY = $(BUILD_DIR)/unity_buschla.cpp
+EXE_SRC_FILES = $(EXE_SRC:=.cpp)
+EXE_SRC_INCLUDES = $(EXE_SRC_FILES:%='\n#include "../%"')
+EXE_OBJ = $(EXE).o
 
-$(APP_OBJS): $(APP_SOURCES)
-	mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -fPIC -c $< -o $@
+# link exe
+$(EXE): $(EXE_OBJ) $(IMGUI_OBJ)
+	$(LINK) -o $(EXE) $(IMGUI_OBJ) $(EXE_OBJ)
+
+# build exe .o file
+$(EXE_OBJ): $(EXE_SRC_UNITY)
+	$(COMPILE) -o $(EXE_OBJ) $(EXE_SRC_UNITY)
+
+# compose exe unity source file
+$(EXE_SRC_UNITY): $(EXE_SRC_FILES) $(BUILD_DIR)
+	@echo -e $(EXE_SRC_INCLUDES) > $(EXE_SRC_UNITY)
+
+## ----------------------------- ##
+
+APP_SRC = app
+
+APP_SRC_UNITY = $(BUILD_DIR)/unity_app.cpp
+APP_SRC_FILES = $(APP_SRC:=.cpp)
+APP_SRC_INCLUDES = $(APP_SRC_FILES:%='\n#include "../%"')
+APP_OBJ = $(APP_LIB).o
+
+# link app
+$(APP_LIB): $(APP_OBJ) $(IMGUI_OBJ)
+	$(LINK) -shared -o $(APP_LIB) $(IMGUI_OBJ) $(APP_OBJ)
+
+# build app .o file
+$(APP_OBJ): $(APP_SRC_UNITY)
+	$(COMPILE) -shared -fPIC -o $(APP_OBJ) $(APP_SRC_UNITY)
+
+# compose app unity source file
+$(APP_SRC_UNITY): $(APP_SRC_FILES) $(BUILD_DIR)
+	@echo -e $(APP_SRC_INCLUDES) > $(APP_SRC_UNITY)
+
+## ----------------------------- ##
+
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
 
 .PHONY: run
-run: $(BUILD_DIR)/$(EXE) $(BUILD_DIR)/$(APP_SO)
-	./$(BUILD_DIR)/$(EXE)
+run: $(EXE) $(APP_LIB)
+	./$(EXE)
 
 .PHONY: clean
 clean:
