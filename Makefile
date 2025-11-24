@@ -78,6 +78,7 @@ $(EXE_SRC_UNITY): $(EXE_SRC_FILES) $(BUILD_DIR)
 ## ----------------------------- ##
 
 APP_SRC = util
+APP_SRC += dynamic_array
 APP_SRC += app
 
 APP_SRC_UNITY = $(BUILD_DIR)/unity_app.cpp

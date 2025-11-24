@@ -5,11 +5,25 @@
 #include <stdlib.h>
 
 #include "util.h"
+#include "dynamic_array.h"
 
 #include "imgui/imgui_internal.h"
 
 #define SPLITTER_SIZE 10.f
 #define SPLIT_MIN_CONTENT_SIZE 100.f
+
+typedef struct {
+    char* txt;
+    uint32_t len;
+} StrView;
+
+typedef struct {
+    uint32_t lineNum;
+    StrView str;
+} LogLine;
+
+DEFINE_DYNAMIC_ARRAY(LogLines, LogLine)
+DEFINE_DYNAMIC_ARRAY(Chars, char)
 
 // NOTE: The memory for the state is automatically allocated.
 // To ensure compatibility between States when hot-reloading,
@@ -23,6 +37,10 @@ typedef struct {
 
     const char* pendingFile;
     FILE* file;
+
+    Chars textBuffer;
+    LogLines logLines;
+
 } State;
 
 // TODO: RIGHT CLICK => reset split!
@@ -205,59 +223,9 @@ static char* fetchLine(FILE* stream, uint32_t* lengthOut) {
     return fetchLineBuffer;
 }
 
-static State* getStateMemory(AppState* state) {
-    size_t stateSize = sizeof(State);
-    // this means we are right after startup
-    if (state->stateMemory == NULL) {
-        state->stateMemory = malloc(stateSize);
-        memset(state->stateMemory, 0, stateSize);
-        state->stateMemorySize = stateSize;
-        printf("[APP] No state memory, allocating %ld bytes.\n", stateSize);
-    }
-    // this means we hot-reloading and added something to the State struct
-    else if (stateSize > state->stateMemorySize) {
-        printf("[APP] More state memory required, allocating %ld bytes (was %ld bytes).\n", stateSize, state->stateMemorySize);
-
-        void* newMemory = malloc(stateSize);
-        memset(newMemory, 0, stateSize);
-        // copy over old contents
-        memcpy(newMemory, state->stateMemory, state->stateMemorySize);
-
-        free(state->stateMemory);
-        state->stateMemory = newMemory;
-        state->stateMemorySize = stateSize;
-    }
-
-    return (State*)state->stateMemory;
-}
-
-
-char filePath[PATH_MAX];
-
-extern "C" void app_main(AppState* appState) {
-    State* state = NULL;
-
-    TIME_SCOPE(guiTimer) {
-        state = getStateMemory(appState);
-
-        ImGui::SetCurrentContext(appState->context);
-
-        gui(state);
-    }
-
-    if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
-        concatPaths(filePath, appState->exePath, "../log.txt");
-        state->pendingFile = filePath;
-    }
-
-    //printf("gui timer: %.3fms\n", guiTimer.elapsedMs);
-
+static void loadLogFile(State* state) {
+    // LOG FILE LOADING
     // NOTE: for text pasted from clipboard: paste to file and then use the same interface for loading log from file!
-    // TODO: how do we load in a log file?
-    // take a file handle
-    // do incremental reads (until we find \n)
-    // then parse the line and add it to our data structs
-    // if we still have time left: do it again (until end of file)
     // TODO: what if the file is modified?
     // => either file was overwritten
     // => or stuff was appended
@@ -272,10 +240,13 @@ extern "C" void app_main(AppState* appState) {
 
         printf("[APP] started fetching file '%s'\n", state->pendingFile);
         state->pendingFile = NULL;
+
+        // if (state->logLines.items == NULL) {
+        //     da_reserve(&state->logLines, 512);
+        // }
     }
 
     if (state->file != NULL) {
-
         uint32_t length = 0;
         char* line = NULL;
         float elapsedTime = 0.f;
@@ -305,6 +276,53 @@ extern "C" void app_main(AppState* appState) {
             printf("[APP] finished fetching file\n");
         }
     }
+}
+
+static State* getStateMemory(AppState* state) {
+    size_t stateSize = sizeof(State);
+    // this means we are right after startup
+    if (state->stateMemory == NULL) {
+        state->stateMemory = malloc(stateSize);
+        memset(state->stateMemory, 0, stateSize);
+        state->stateMemorySize = stateSize;
+        printf("[APP] No state memory, allocating %ld bytes.\n", stateSize);
+    }
+    // this means we hot-reloading and added something to the State struct
+    else if (stateSize > state->stateMemorySize) {
+        printf("[APP] More state memory required, allocating %ld bytes (was %ld bytes).\n", stateSize, state->stateMemorySize);
+
+        void* newMemory = malloc(stateSize);
+        memset(newMemory, 0, stateSize);
+        // copy over old contents
+        memcpy(newMemory, state->stateMemory, state->stateMemorySize);
+
+        free(state->stateMemory);
+        state->stateMemory = newMemory;
+        state->stateMemorySize = stateSize;
+    }
+
+    return (State*)state->stateMemory;
+}
+
+char filePath[PATH_MAX];
+
+extern "C" void app_main(AppState* appState) {
+    State* state = NULL;
+
+    TIME_SCOPE(guiTimer) {
+        state = getStateMemory(appState);
+
+        ImGui::SetCurrentContext(appState->context);
+
+        gui(state);
+    }
+
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+        concatPaths(filePath, appState->exePath, "../log.txt");
+        state->pendingFile = filePath;
+    }
+
+    loadLogFile(state);
 
     // ImGui::ShowStyleEditor();
 }

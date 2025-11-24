@@ -97,14 +97,14 @@ static void triggerHotReloadStatus(bool success, const char* msg) {
 }
 
 static void drawHotReloadStatusWindow(AppState* state) {
-    ImGui::SetNextWindowPos(ImVec2(100, 100));
-    ImGui::Begin("asdlfkjwlekjf");
-    ImGui::Text("targetState: %d", hotReloadStatusWindow.targetState);
-    ImGui::Text("t: %.3f", hotReloadStatusWindow.t);
-    ImGui::Text("timeVisible: %.3f", hotReloadStatusWindow.timeVisible);
-    ImGui::Text("success: %d", hotReloadStatusWindow.success);
-    ImGui::Text("msg: %p", hotReloadStatusWindow.msg);
-    ImGui::End();
+    // ImGui::SetNextWindowPos(ImVec2(100, 100));
+    // ImGui::Begin("asdlfkjwlekjf");
+    // ImGui::Text("targetState: %d", hotReloadStatusWindow.targetState);
+    // ImGui::Text("t: %.3f", hotReloadStatusWindow.t);
+    // ImGui::Text("timeVisible: %.3f", hotReloadStatusWindow.timeVisible);
+    // ImGui::Text("success: %d", hotReloadStatusWindow.success);
+    // ImGui::Text("msg: %p", hotReloadStatusWindow.msg);
+    // ImGui::End();
 
     const float animationDuration = .6f;
     const float fullyEasedInThreshold = .95f;
