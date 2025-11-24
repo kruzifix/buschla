@@ -77,7 +77,8 @@ $(EXE_SRC_UNITY): $(EXE_SRC_FILES) $(BUILD_DIR)
 
 ## ----------------------------- ##
 
-APP_SRC = app
+APP_SRC = util
+APP_SRC += app
 
 APP_SRC_UNITY = $(BUILD_DIR)/unity_app.cpp
 APP_SRC_FILES = $(APP_SRC:=.cpp)
@@ -103,6 +104,7 @@ $(BUILD_DIR):
 
 .PHONY: run
 run: all
+	- killall buschla
 	$(EXE)
 
 .PHONY: clean

@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "util.h"
+
 #include "imgui/imgui_internal.h"
 
 #define SPLITTER_SIZE 10.f
@@ -18,6 +20,9 @@ typedef struct {
     float xSplit;
     float ySplitLeft;
     float ySplitRight;
+
+    const char* pendingFile;
+    FILE* file;
 } State;
 
 // TODO: RIGHT CLICK => reset split!
@@ -41,24 +46,24 @@ static void splitter(const char* label, float& splitValue, bool horizontal) {
 
 static void gui(State* state) {
     if (ImGui::BeginMainMenuBar()) {
-        if (ImGui::BeginMenu("File")) {
-            // ShowExampleMenuFile();
-            ImGui::EndMenu();
-        }
-        if (ImGui::BeginMenu("Edit")) {
-            if (ImGui::MenuItem("Undo", "Ctrl+Z")) {
-            }
-            if (ImGui::MenuItem("Redo", "Ctrl+Y", false, false)) {
-            } // Disabled item
-            ImGui::Separator();
-            if (ImGui::MenuItem("Cut", "Ctrl+X")) {
-            }
-            if (ImGui::MenuItem("Copy", "Ctrl+C")) {
-            }
-            if (ImGui::MenuItem("Paste", "Ctrl+V")) {
-            }
-            ImGui::EndMenu();
-        }
+        // if (ImGui::BeginMenu("File")) {
+        //     // ShowExampleMenuFile();
+        //     ImGui::EndMenu();
+        // }
+        // if (ImGui::BeginMenu("Edit")) {
+        //     if (ImGui::MenuItem("Undo", "Ctrl+Z")) {
+        //     }
+        //     if (ImGui::MenuItem("Redo", "Ctrl+Y", false, false)) {
+        //     } // Disabled item
+        //     ImGui::Separator();
+        //     if (ImGui::MenuItem("Cut", "Ctrl+X")) {
+        //     }
+        //     if (ImGui::MenuItem("Copy", "Ctrl+C")) {
+        //     }
+        //     if (ImGui::MenuItem("Paste", "Ctrl+V")) {
+        //     }
+        //     ImGui::EndMenu();
+        // }
         ImGui::EndMainMenuBar();
     }
 
@@ -148,17 +153,70 @@ static void gui(State* state) {
     ImGui::End();
 }
 
+// Returns pointer to statically allocated buffer. Don't store this pointer!
+// The contents will be modified the next time fetchLine is called.
+// If EOF or an error occured while reading, NULL is returned instead.
+// TODO: For now we cut off any line longer than 4K characters.
+// Is that an ok assumption to make?  ¯\_(ツ)_/¯
+static char fetchLineBuffer[4 * 1024];
+static char* fetchLine(FILE* stream, uint32_t* lengthOut) {
+    if (stream == NULL) {
+        return NULL;
+    }
+
+    uint32_t length = 0;
+    while (length < sizeof(fetchLineBuffer)) {
+        char c;
+        size_t count = fread(&c, 1, 1, stream);
+        if (count != 1) {
+            if (length == 0) {
+                return NULL;
+            }
+
+            break;
+        }
+
+        if (c == '\n') {
+            break;
+        }
+
+        // Ignore other non-printable characters
+        // 0x7F is DEL
+        if (ASCII_IS_CONTROL(c) || UTF8_IS_CONTINUATION(c)) {
+            continue;
+        }
+
+        bool isAscii = c >= 0 && c < 0x80;
+        bool isCodePointStart = UTF8_IS_START(c);
+
+        bool addToBuffer = isAscii;
+        if (isCodePointStart) {
+            c = '?';
+            addToBuffer = true;
+        }
+
+        if (addToBuffer) {
+            fetchLineBuffer[length] = c;
+            ++length;
+        }
+    }
+
+    *lengthOut = length;
+    return fetchLineBuffer;
+}
+
 static State* getStateMemory(AppState* state) {
     size_t stateSize = sizeof(State);
     // this means we are right after startup
     if (state->stateMemory == NULL) {
         state->stateMemory = malloc(stateSize);
+        memset(state->stateMemory, 0, stateSize);
         state->stateMemorySize = stateSize;
-        printf("[APP] No state memory, allocating %ld.\n", stateSize);
+        printf("[APP] No state memory, allocating %ld bytes.\n", stateSize);
     }
     // this means we hot-reloading and added something to the State struct
     else if (stateSize > state->stateMemorySize) {
-        printf("[APP] More state memory required, allocating %ld (was %ld).\n", stateSize, state->stateMemorySize);
+        printf("[APP] More state memory required, allocating %ld bytes (was %ld bytes).\n", stateSize, state->stateMemorySize);
 
         void* newMemory = malloc(stateSize);
         memset(newMemory, 0, stateSize);
@@ -173,12 +231,80 @@ static State* getStateMemory(AppState* state) {
     return (State*)state->stateMemory;
 }
 
+
+char filePath[PATH_MAX];
+
 extern "C" void app_main(AppState* appState) {
-    State* state = getStateMemory(appState);
+    State* state = NULL;
 
-    ImGui::SetCurrentContext(appState->context);
+    TIME_SCOPE(guiTimer) {
+        state = getStateMemory(appState);
 
-    gui(state);
+        ImGui::SetCurrentContext(appState->context);
+
+        gui(state);
+    }
+
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+        concatPaths(filePath, appState->exePath, "../log.txt");
+        state->pendingFile = filePath;
+    }
+
+    //printf("gui timer: %.3fms\n", guiTimer.elapsedMs);
+
+    // NOTE: for text pasted from clipboard: paste to file and then use the same interface for loading log from file!
+    // TODO: how do we load in a log file?
+    // take a file handle
+    // do incremental reads (until we find \n)
+    // then parse the line and add it to our data structs
+    // if we still have time left: do it again (until end of file)
+    // TODO: what if the file is modified?
+    // => either file was overwritten
+    // => or stuff was appended
+    // we have to detect which happened, and then act accordingly!
+
+    if (state->file == NULL && state->pendingFile != NULL) {
+        state->file = fopen(state->pendingFile, "r");
+        if (state->file == NULL) {
+            perror("fopen state->file");
+            return;
+        }
+
+        printf("[APP] started fetching file '%s'\n", state->pendingFile);
+        state->pendingFile = NULL;
+    }
+
+    if (state->file != NULL) {
+
+        uint32_t length = 0;
+        char* line = NULL;
+        float elapsedTime = 0.f;
+
+        int lines = 0;
+        while (elapsedTime < 5.f) {
+            TIME_SCOPE(fetchLineTimer) {
+                line = fetchLine(state->file, &length);
+                ++lines;
+            }
+
+            elapsedTime += fetchLineTimer.elapsedMs;
+            if (line == NULL) {
+                break;
+            }
+        }
+
+        printf("[APP] fetched %d lines in %.3fms\n", lines, elapsedTime);
+
+        if (line == NULL) {
+            int ret = fclose(state->file);
+            if (ret != 0) {
+                perror("fclose state->file");
+            }
+
+            state->file = NULL;
+            printf("[APP] finished fetching file\n");
+        }
+    }
 
     // ImGui::ShowStyleEditor();
 }

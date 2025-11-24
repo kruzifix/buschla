@@ -14,6 +14,25 @@ typedef struct {
 
 #define TODO(msg) (assert(false && #msg))
 
+#define TERM_COL_CLEAR "\033[0m"
+#define TERM_COL_BLACK_BOLD "\033[30;1m"
+#define TERM_COL_RED_BOLD "\033[31;1m"
+#define TERM_COL_GREEN_BOLD "\033[32;1m"
+#define TERM_COL_YELLOW_BOLD "\033[33;1m"
+#define TERM_COL_BLUE_BOLD "\033[34;1m"
+#define TERM_COL_MAGENTA_BOLD "\033[35;1m"
+#define TERM_COL_CYAN_BOLD "\033[36;1m"
+#define TERM_COL_WHITE_BOLD "\033[37;1m"
+
+#define ASCII_IS_CONTROL(c) ((unsigned char)(c) < 0x20 || (c) == 0x7F)
+
+#define UTF8_IS_CONTINUATION(c) (((c) & 0xC0) == 0x80)
+#define UTF8_IS_START(c) ((unsigned char)(c) >= 0xC0)
+#define UTF8_IS_START_2BYTE(c) (((c) & 0xE0) == 0xC0)
+#define UTF8_IS_START_3BYTE(c) (((c) & 0xF0) == 0xE0)
+#define UTF8_IS_START_4BYTE(c) (((c) & 0xF8) == 0xF0)
+
+
 size_t getStringLength(const char* str);
 
 // Pass argv[0] to callingPath.
@@ -41,7 +60,7 @@ typedef struct {
     float elapsedMs;
 } Timer;
 
-#define TIME_SCOPE(timerPtr) for (bool latch = timerBegin(timerPtr); latch; latch = timerEnd(timerPtr))
+#define TIME_SCOPE(name) Timer name; for (bool latch = timerBegin(&name); latch; latch = timerEnd(&name))
 
 bool timerBegin(Timer* t);
 bool timerEnd(Timer* t);

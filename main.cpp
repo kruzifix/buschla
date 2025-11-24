@@ -214,13 +214,14 @@ static void drawHotReloadStatusWindow(AppState* state) {
 #endif
 
 int main(int argc, char** argv) {
-#ifdef ENABLE_HOT_RELOADING
-    char exePath[PATH_MAX];
-    bool exePathRet = getExecutablePath(argv[0], exePath);
+    AppState state;
+    state.stateMemory = NULL;
+    state.stateMemorySize = 0;
+    bool exePathRet = getExecutablePath(argv[0], state.exePath);
     assert(exePathRet);
+    splitAtLastOccurence(state.exePath, '/');
 
-    splitAtLastOccurence(exePath, '/');
-
+#ifdef ENABLE_HOT_RELOADING
     DirWatcherState watcherState;
     memset(&watcherState, 0, sizeof(DirWatcherState));
 
@@ -231,7 +232,7 @@ int main(int argc, char** argv) {
     };
     char watcherPath[PATH_MAX];
     for (size_t i = 0; i < ARRAY_SIZE(watchPaths); ++i) {
-        concatPaths(watcherPath, exePath, watchPaths[i]);
+        concatPaths(watcherPath, state.exePath, watchPaths[i]);
         DirWatcherConfig_AppendDirectory(&watcherState.config, watcherPath);
     }
 
@@ -270,7 +271,7 @@ int main(int argc, char** argv) {
     SDL_SetGPUSwapchainParameters(gpu_device, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, SDL_GPU_PRESENTMODE_VSYNC);
 
     IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
+    state.context = ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     // io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     //  io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
@@ -295,14 +296,14 @@ int main(int argc, char** argv) {
     ImGui_ImplSDLGPU3_Init(&init_info);
 
     char fontPath[PATH_MAX];
-    concatPaths(fontPath, exePath, "/font.ttf");
+    concatPaths(fontPath, state.exePath, "/font.ttf");
     ImFont* font = io.Fonts->AddFontFromFileTTF(fontPath);
     IM_ASSERT(font != NULL);
 
 #ifdef ENABLE_HOT_RELOADING
 
     char tmpPath[PATH_MAX];
-    concatPaths(tmpPath, exePath, "/tmp");
+    concatPaths(tmpPath, state.exePath, "/tmp");
 
     char cmdBuffer[PATH_MAX];
     snprintf(cmdBuffer, sizeof(cmdBuffer), "rm -rf %s", tmpPath);
@@ -311,7 +312,7 @@ int main(int argc, char** argv) {
     system(cmdBuffer);
 
     char appLibraryPath[PATH_MAX];
-    concatPaths(appLibraryPath, exePath, "app.so");
+    concatPaths(appLibraryPath, state.exePath, "app.so");
 
     int tmpLibraryId = 0;
 
@@ -328,13 +329,7 @@ int main(int argc, char** argv) {
     }
 #endif
 
-    AppState state;
-    state.context = ImGui::GetCurrentContext();
-    state.stateMemory = NULL;
-    state.stateMemorySize = 0;
-
     float lastTime = ImGui::GetTime();
-
     bool done = false;
     while (!done) {
         state.time = ImGui::GetTime();
@@ -371,8 +366,7 @@ int main(int argc, char** argv) {
 
                 // TODO: should we check the modified date of the app.so to determine if we should really reload?
                 if (watcherEvent.reactionReport.exitStatus == 0) {
-                    Timer hotReloadTimer;
-                    TIME_SCOPE(&hotReloadTimer) {
+                    TIME_SCOPE(hotReloadTimer) {
                         ++tmpLibraryId;
                         char newTmpLibraryPath[PATH_MAX];
                         snprintf(newTmpLibraryPath, sizeof(newTmpLibraryPath), "%s/tmp%04d", tmpPath, tmpLibraryId);
