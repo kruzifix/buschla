@@ -96,7 +96,7 @@ static void triggerHotReloadStatus(bool success, const char* msg) {
     hotReloadStatusWindow.msg = strdup(msg);
 }
 
-static void drawHotReloadStatusWindow() {
+static void drawHotReloadStatusWindow(AppState* state) {
     ImGui::SetNextWindowPos(ImVec2(100, 100));
     ImGui::Begin("asdlfkjwlekjf");
     ImGui::Text("targetState: %d", hotReloadStatusWindow.targetState);
@@ -108,22 +108,13 @@ static void drawHotReloadStatusWindow() {
 
     const float animationDuration = .6f;
     const float fullyEasedInThreshold = .95f;
-    static float lastTime = -1.f;
-
-    float time = ImGui::GetTime();
-    if (lastTime < 0.f) {
-        lastTime = time;
-    }
-
-    float dt = time - lastTime;
-    lastTime = time;
 
     if (hotReloadStatusWindow.t < .05f &&
         !hotReloadStatusWindow.targetState) {
         return;
     }
 
-    float delta = dt / animationDuration * (hotReloadStatusWindow.targetState ? 1.f : -1.f);
+    float delta = state->dt / animationDuration * (hotReloadStatusWindow.targetState ? 1.f : -1.f);
     bool lastEasedIn = hotReloadStatusWindow.t > fullyEasedInThreshold;
     hotReloadStatusWindow.t = ImClamp(hotReloadStatusWindow.t + delta, 0.f, 1.f);
     bool easedIn = hotReloadStatusWindow.t > fullyEasedInThreshold;
@@ -133,7 +124,7 @@ static void drawHotReloadStatusWindow() {
     }
 
     if (easedIn) {
-        hotReloadStatusWindow.timeVisible += dt;
+        hotReloadStatusWindow.timeVisible += state->dt;
     }
 
     if (hotReloadStatusWindow.autoClose &&
@@ -309,6 +300,7 @@ int main(int argc, char** argv) {
     IM_ASSERT(font != NULL);
 
 #ifdef ENABLE_HOT_RELOADING
+
     char tmpPath[PATH_MAX];
     concatPaths(tmpPath, exePath, "/tmp");
 
@@ -341,8 +333,14 @@ int main(int argc, char** argv) {
     state.stateMemory = NULL;
     state.stateMemorySize = 0;
 
+    float lastTime = ImGui::GetTime();
+
     bool done = false;
     while (!done) {
+        state.time = ImGui::GetTime();
+        state.dt = state.time - lastTime;
+        lastTime = state.time;
+
         // Poll and handle events (inputs, window resize, etc.)
         // You can read the io.WantCaptureMouse, io.WantCaptureKeyboard flags to tell if dear imgui wants to use your inputs.
         // - When io.WantCaptureMouse is true, do not dispatch mouse input data to your main application, or clear/overwrite your copy of the mouse data.
@@ -373,35 +371,41 @@ int main(int argc, char** argv) {
 
                 // TODO: should we check the modified date of the app.so to determine if we should really reload?
                 if (watcherEvent.reactionReport.exitStatus == 0) {
-                    ++tmpLibraryId;
-                    char newTmpLibraryPath[PATH_MAX];
-                    snprintf(newTmpLibraryPath, sizeof(newTmpLibraryPath), "%s/tmp%04d", tmpPath, tmpLibraryId);
+                    Timer hotReloadTimer;
+                    TIME_SCOPE(&hotReloadTimer) {
+                        ++tmpLibraryId;
+                        char newTmpLibraryPath[PATH_MAX];
+                        snprintf(newTmpLibraryPath, sizeof(newTmpLibraryPath), "%s/tmp%04d", tmpPath, tmpLibraryId);
 
-                    snprintf(cmdBuffer, sizeof(cmdBuffer), "cp %s %s", appLibraryPath, newTmpLibraryPath);
-                    // TODO: check exit status!
-                    system(cmdBuffer);
-
-                    AppLibraryState newAppLibrary;
-                    if (tryLoadAppLibrary(newTmpLibraryPath, &newAppLibrary)) {
-                        unloadAppLibrary(&appLibrary);
-                        // TODO: should we delete the old tmp library here?
-                        appLibrary.handle = newAppLibrary.handle;
-                        appLibrary.app_main = newAppLibrary.app_main;
-                        printf("Successfully replaced app library!\n");
-
-                        snprintf(cmdBuffer, sizeof(cmdBuffer), "rm %s", tmpLibraryPath);
+                        snprintf(cmdBuffer, sizeof(cmdBuffer), "cp %s %s", appLibraryPath, newTmpLibraryPath);
                         // TODO: check exit status!
                         system(cmdBuffer);
 
-                        memcpy(tmpLibraryPath, newTmpLibraryPath, sizeof(tmpLibraryPath));
+                        AppLibraryState newAppLibrary;
+                        if (tryLoadAppLibrary(newTmpLibraryPath, &newAppLibrary)) {
+                            unloadAppLibrary(&appLibrary);
+                            // TODO: should we delete the old tmp library here?
+                            appLibrary.handle = newAppLibrary.handle;
+                            appLibrary.app_main = newAppLibrary.app_main;
 
-                        triggerHotReloadStatus(true, watcherEvent.reactionReport.statusMsg);
+                            snprintf(cmdBuffer, sizeof(cmdBuffer), "rm %s", tmpLibraryPath);
+                            // TODO: check exit status!
+                            system(cmdBuffer);
+
+                            memcpy(tmpLibraryPath, newTmpLibraryPath, sizeof(tmpLibraryPath));
+
+                            triggerHotReloadStatus(true, watcherEvent.reactionReport.statusMsg);
+
+                            printf("[BUSCHLA] Successfully replaced app library!\n");
+                        }
+                        else {
+                            char* errorString = dlerror();
+                            fprintf(stderr, "%s\n", errorString);
+                            triggerHotReloadStatus(false, errorString);
+                        }
                     }
-                    else {
-                        char* errorString = dlerror();
-                        fprintf(stderr, "%s\n", errorString);
-                        triggerHotReloadStatus(false, errorString);
-                    }
+
+                    printf("[BUSCHLA] Hot-Reload took %.3fms\n", hotReloadTimer.elapsedMs);
                 }
                 else {
                     triggerHotReloadStatus(false, watcherEvent.reactionReport.statusMsg);
@@ -418,17 +422,16 @@ int main(int argc, char** argv) {
         ImGui_ImplSDLGPU3_NewFrame();
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
-        //ImGui::PushFont(font, 0.f);
 
 #ifdef ENABLE_HOT_RELOADING
         if (appLibrary.app_main != NULL) {
             appLibrary.app_main(&state);
         }
 
-        drawHotReloadStatusWindow();
+        drawHotReloadStatusWindow(&state);
 
 #else
-#error "If we are not hot reloading, we should statically link app_main!"
+#error "TODO: If we are not hot reloading, we should statically link app_main!"
 #endif
 
         //ImGui::PopFont();

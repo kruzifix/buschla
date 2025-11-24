@@ -92,6 +92,7 @@ static void gui(State* state) {
             state->ySplitRight = windowSize.y * .5f;
         }
 
+        // TODO: Create RAII objs to handle this nicely.
 #define STYLE_VAR(name, value)                \
     {                                         \
         ImGui::PushStyleVar((name), (value)); \

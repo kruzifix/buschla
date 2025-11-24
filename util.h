@@ -1,8 +1,9 @@
 #pragma once
 
-#include <stdbool.h>
 #include <bits/types/FILE.h>
-#include <cstddef>
+#include <stdbool.h>
+#include <stdint.h>
+#include <time.h>
 
 typedef struct {
     int readFd;
@@ -10,6 +11,8 @@ typedef struct {
 } Pipe;
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(*a))
+
+#define TODO(msg) (assert(false && #msg))
 
 size_t getStringLength(const char* str);
 
@@ -30,5 +33,15 @@ char* splitAtLastOccurence(char* src, char c);
 // returns return value of realpath, check errno if this returned false!
 bool concatPaths_(char* dest, const char* paths[], int count);
 
-// TODO:
 void hexdump(FILE* stream, void* memory, size_t size);
+
+typedef struct {
+    uint64_t begin;
+    uint64_t end;
+    float elapsedMs;
+} Timer;
+
+#define TIME_SCOPE(timerPtr) for (bool latch = timerBegin(timerPtr); latch; latch = timerEnd(timerPtr))
+
+bool timerBegin(Timer* t);
+bool timerEnd(Timer* t);

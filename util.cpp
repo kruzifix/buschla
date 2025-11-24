@@ -8,6 +8,8 @@
 #include <unistd.h>
 #include <stdint.h>
 
+#include <SDL3/SDL.h>
+
 size_t getStringLength(const char* str) {
     if (str == NULL) {
         return 0;
@@ -122,4 +124,17 @@ void hexdump(FILE* stream, void* memory, size_t size) {
         _hexdump_printChars(stream, ((char*)memory) + (size - remainder), remainder);
     }
     putc('\n', stream);
+}
+
+#define TIMER_CLOCK_ID CLOCK_MONOTONIC_RAW
+bool timerBegin(Timer* t) {
+    t->begin = SDL_GetTicksNS();
+    return true;
+}
+
+bool timerEnd(Timer* t) {
+    t->end = SDL_GetTicksNS();
+    long diffNano = t->end - t->begin;
+    t->elapsedMs = diffNano * 1e-6f;
+    return false;
 }
