@@ -19,30 +19,41 @@ void _da_reserve(_DummyDynamicArray* array, uint32_t itemSize, uint32_t requeste
     if (array->capacity < requestedSize) {
         printf("%s: growing capacity %u -> %u\n", __FUNCTION__, array->capacity, requestedSize);
         uint32_t bytes = requestedSize * itemSize;
-        void* newItems = malloc(bytes);
-        printf("%s: allocated %u bytes (itemSize is %u)\n", __FUNCTION__, bytes, itemSize);
-        // NOTE: If we already have items in the array,
-        // don't zero out those bytes, they will be overriden anyway!
-        uint32_t offset = array->count * itemSize;
-        printf("%s: count is %u, zeroing out %u bytes at offset %u\n", __FUNCTION__, array->count, bytes - offset, offset);
-        // TODO: Is it bad to do this? Should the caller/user be responsible for properly initializing all their values?
-        memset((uint8_t*)newItems + offset, 0, bytes - offset);
+        // void* newItems = malloc(bytes);
+        // printf("%s: allocated %u bytes (itemSize is %u)\n", __FUNCTION__, bytes, itemSize);
 
-        if (array->count > 0) {
-            assert(array->items != NULL);
 
-            printf("%s: copying %u items\n", __FUNCTION__, array->count);
-            memcpy(newItems, array->items, array->count * itemSize);
-        }
+        // // NOTE: If we already have items in the array,
+        // // don't zero out those bytes, they will be overriden anyway!
+        // uint32_t offset = array->count * itemSize;
+        // printf("%s: count is %u, zeroing out %u bytes at offset %u\n", __FUNCTION__, array->count, bytes - offset, offset);
+        // // TODO: Is it bad to do this? Should the caller/user be responsible for properly initializing all their values?
+        // // TODO: YES! I think so, because if we array is reset (i.e. count = 0 without freeing and re-allocating),
+        // // TODO: then the contents could also be garbage instead of being zero-initialized!
+        // memset((uint8_t*)newItems + offset, 0, bytes - offset);
 
-        if (array->items != NULL) {
-            free(array->items);
-        }
 
-        array->items = newItems;
+        // if (array->count > 0) {
+        //     assert(array->items != NULL);
+
+        //     printf("%s: copying %u items\n", __FUNCTION__, array->count);
+        //     memcpy(newItems, array->items, array->count * itemSize);
+        // }
+
+        // if (array->items != NULL) {
+        //     free(array->items);
+        // }
+
+        array->items = realloc(array->items, bytes);
+        assert(array->items != NULL && "Buy more RAM lel");
         array->capacity = requestedSize;
         printf("%s: capacity is now %u\n", __FUNCTION__, array->capacity);
     }
+}
+
+void _da_reset(_DummyDynamicArray* array, uint32_t itemSize) {
+    array->count = 0;
+
 }
 
 void _da_free(_DummyDynamicArray* array, uint32_t itemSize) {
@@ -53,6 +64,11 @@ void _da_free(_DummyDynamicArray* array, uint32_t itemSize) {
 }
 
 void _da_append(_DummyDynamicArray* array, uint32_t itemSize, void* item) {
+    void* itemPtr = _da_append_get(array, itemSize);
+    memcpy(itemPtr, item, itemSize);
+}
+
+void* _da_append_get(_DummyDynamicArray* array, uint32_t itemSize) {
     if (array->items == NULL) {
         assert(array->capacity == 0);
         assert(array->count == 0);
@@ -75,8 +91,9 @@ void _da_append(_DummyDynamicArray* array, uint32_t itemSize, void* item) {
     printf("%s: appending item (count: %u) (capacity: %u) (itemSize: %u)\n", __FUNCTION__, array->count, array->capacity, itemSize);
 
     void* itemPtr = (uint8_t*)array->items + (array->count * itemSize);
-    memcpy(itemPtr, item, itemSize);
     ++array->count;
+
+    return itemPtr;
 }
 
 char* ca_commit(Chars* chars, const char* str) {
@@ -97,7 +114,8 @@ static char* _ca_commit_to_chunk(CharsChunk* chunk, StrView view) {
     memcpy(dest, view.txt, view.len);
     dest[view.len] = '\0';
     chunk->count += view.len + 1;
-    printf("%s: appending %u bytes to chunk %p. count is now %u\n", __FUNCTION__, view.len + 1, chunk, chunk->count);
+    ++chunk->strCount;
+    printf("%s: appending %u bytes to chunk %p. count is now %u. strCount is %u.\n", __FUNCTION__, view.len + 1, chunk, chunk->count, chunk->strCount);
     return dest;
 }
 
@@ -126,27 +144,39 @@ char* ca_commit_view(Chars* chars, StrView view) {
     CharsChunk chunk;
     chunk.content = (char*)malloc(CHARS_CHUNK_SIZE);
     chunk.count = 0;
+    chunk.strCount = 0;
     char* ret = _ca_commit_to_chunk(&chunk, view);
     da_append(chars, chunk);
     return ret;
 }
 
-void ca_dump(FILE* stream, Chars* chars) {
-    fprintf(stream, "dumping Chars at %p (%d chunks)\n", chars, chars->count);
+void ca_reset(Chars* chars) {
     for (uint32_t i = 0; i < chars->count; ++i) {
-        fprintf(stream, "Chunk %d (count %d)\n", i, chars->items[i].count);
+        chars->items[i].count = 0;
+        chars->items[i].strCount = 0;
+    }
+}
+
+void ca_dump(FILE* stream, Chars* chars) {
+    fprintf(stream, "dumping Chars at %p (chunks: %d)\n", chars, chars->count);
+    for (uint32_t i = 0; i < chars->count; ++i) {
+        fprintf(stream, "Chunk %d (count: %d) (strCount: %d)\n", i, chars->items[i].count, chars->items[i].strCount);
 
         char* content = chars->items[i].content;
         char* str = content;
         char* p = content + 1;
         uint32_t index = 0;
+        // TODO: Sigh. when printing the str or getting the length,
+        // TODO: its still possible we display/count some bytes after chars->items[i].count
+        // FIXME: IMPROVE THIS
         for (uint32_t j = 0; j < chars->items[i].count; ++j) {
             if (*p == '\0') {
                 if (p == str + 1 && *str == '\0') {
                     break;
                 }
 
-                fprintf(stream, "%4d: '%s'\n", index, str);
+                //fprintf(stream, "%4d: '%s'\n", index, str);
+                fprintf(stream, "%4d: length: %ld\n", index, strlen(str));
                 ++index;
                 str = p + 1;
                 p = str;

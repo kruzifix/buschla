@@ -185,6 +185,10 @@ static int _DirWatcher_ChildProc(void* arg) {
             close(p.readFd);
             close(p.writeFd);
 
+            // NOTE: Don't leak file descriptors!
+            close(stdoutFd);
+            close(stderrFd);
+
             write(state->pipe.writeFd, state->buffer, sizeof(DirWatcherEvent) + size);
         }
     }

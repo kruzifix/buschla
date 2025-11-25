@@ -13,18 +13,25 @@
 #define DA_EXPAND_ARGS(arrayPtr) (_DummyDynamicArray*)(arrayPtr), da_item_size(arrayPtr)
 
 #define da_reserve(arrayPtr, requestedSize) _da_reserve(DA_EXPAND_ARGS(arrayPtr), requestedSize)
+// Sets count = 0, does not de-allocate.
+#define da_reset(arrayPtr) _da_reset(DA_EXPAND_ARGS(arrayPtr))
 #define da_free(arrayPtr) _da_free(DA_EXPAND_ARGS(arrayPtr))
+
 // Expects an lvalue, which it then takes a pointer to.
 #define da_append(arrayPtr, item) da_append_ptr(arrayPtr, &item)
 // Expects a pointer to an item.
 #define da_append_ptr(arrayPtr, itemPtr) _da_append(DA_EXPAND_ARGS(arrayPtr), (void*)(itemPtr))
+// Adds an item and returns a pointer to it.
+// NOTE: The decltype cast is really stupid, but sadly required because we are compiling as C++
+#define da_append_get(arrayPtr) (decltype((arrayPtr)->items))_da_append_get(DA_EXPAND_ARGS(arrayPtr))
 
 DEFINE_DYNAMIC_ARRAY(_DummyDynamicArray, void)
 
-// TODO: we kinda always need the itemSize, should we just bake it into the struct?
 void _da_reserve(_DummyDynamicArray* array, uint32_t itemSize, uint32_t requestedSize);
+void _da_reset(_DummyDynamicArray* array, uint32_t itemSize);
 void _da_free(_DummyDynamicArray* array, uint32_t itemSize);
 void _da_append(_DummyDynamicArray* array, uint32_t itemSize, void* item);
+void* _da_append_get(_DummyDynamicArray* array, uint32_t itemSize);
 
 
 // --------------------------------- CHUNK ARRAY --------------------------------- //
@@ -34,17 +41,24 @@ void _da_append(_DummyDynamicArray* array, uint32_t itemSize, void* item);
 // by bit shifting & and-ing.
 
 // NOTE: For now lets just make a string oriented chunk array! we can always generalize if needed.
+// TODO: This can maybe be even bigger?
+// TODO: Or we say that the first chunk in a chunk array is 4096 and for smaller strings,
+// TODO: And any chunk allocated later on are bigger?
 #define CHARS_CHUNK_SIZE 4096
 
 typedef struct {
     char* content;
     // "Points" to next free byte (i.e. stores how much space is occupied)
     uint32_t count;
+    uint32_t strCount;
 } CharsChunk;
 
 DEFINE_DYNAMIC_ARRAY(Chars, CharsChunk)
 
 char* ca_commit(Chars* chars, const char* str);
 char* ca_commit_view(Chars* chars, StrView view);
+
+// Resets the count of each chunk, does not de-allocate.
+void ca_reset(Chars* chars);
 
 void ca_dump(FILE* stream, Chars* chars);

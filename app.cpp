@@ -25,7 +25,9 @@ DEFINE_DYNAMIC_ARRAY(LogLines, LogLine)
 // IF you need to re-arrange members, then you must restart the whole program!
 // If stuff is added at the end, it is zero initialized!
 typedef struct {
+    // Stores width of right(!) region.
     float xSplit;
+
     float ySplitLeft;
     float ySplitRight;
 
@@ -38,7 +40,7 @@ typedef struct {
 } State;
 
 // TODO: RIGHT CLICK => reset split!
-static void splitter(const char* label, float& splitValue, bool horizontal) {
+static void splitter(const char* label, float* splitValue, bool horizontal) {
     ImVec2 windowSize = ImGui::GetWindowSize();
 
     ImVec2 size = horizontal ? ImVec2(SPLITTER_SIZE, windowSize.y) : ImVec2(windowSize.x, SPLITTER_SIZE);
@@ -52,11 +54,13 @@ static void splitter(const char* label, float& splitValue, bool horizontal) {
 
     if (active) {
         int axisIndex = horizontal ? 0 : 1;
-        splitValue = ImClamp(splitValue + ImGui::GetIO().MouseDelta[axisIndex], SPLIT_MIN_CONTENT_SIZE, windowSize[axisIndex] - SPLIT_MIN_CONTENT_SIZE);
+        *splitValue = ImClamp(*splitValue + ImGui::GetIO().MouseDelta[axisIndex], SPLIT_MIN_CONTENT_SIZE, windowSize[axisIndex] - SPLIT_MIN_CONTENT_SIZE);
     }
 }
 
-static void gui(State* state) {
+char filePath[PATH_MAX];
+
+static void gui(AppState* appState, State* state) {
     if (ImGui::BeginMainMenuBar()) {
         // if (ImGui::BeginMenu("File")) {
         //     // ShowExampleMenuFile();
@@ -98,9 +102,10 @@ static void gui(State* state) {
     bool open = true;
     if (ImGui::Begin("Fullscreen Window", &open, flags)) {
         ImVec2 windowSize = ImGui::GetWindowSize();
-        // TODO: This does not seem to be working ...
+        // TODO: When window is resized, we kinda want the right section to stay the same size, right?
+        // That means we need to store the width of the right section, instead of the left.
         if (state->xSplit <= 0.f) {
-            state->xSplit = windowSize.x - 300.f;
+            state->xSplit = 300.f;
         }
         if (state->ySplitLeft <= 0.f) {
             state->ySplitLeft = windowSize.y * .5f;
@@ -125,15 +130,28 @@ static void gui(State* state) {
         STYLE_VAR2(ImGuiStyleVar_ItemSpacing, 0.f, 0.f);
         STYLE_VAR(ImGuiStyleVar_ChildBorderSize, 0.f);
 
-        ImGui::BeginChild("region_left", ImVec2(state->xSplit, 0.f), ImGuiChildFlags_Borders);
+        float widthLeft = windowSize.x - state->xSplit;
+        ImGui::BeginChild("region_left", ImVec2(widthLeft, 0.f), ImGuiChildFlags_Borders);
 
-        ImGui::BeginChild("region_left_top", ImVec2(state->xSplit, state->ySplitLeft));
+        ImGui::BeginChild("region_left_top", ImVec2(widthLeft, state->ySplitLeft),
+            0, ImGuiWindowFlags_HorizontalScrollbar);
         // TODO: Inside the regions we do probably want ItemSpacing!!!
-        ImGui::Text("Top Left");
+
+        for (uint32_t i = 0; i < state->logLines.count; ++i) {
+            ImGui::PushID(i);
+
+            LogLine* logLine = state->logLines.items + i;
+            ImGui::Text("%5d", logLine->lineNum);
+            ImGui::SameLine(0.f, 4.f);
+            const char* txt = logLine->str.txt;
+            ImGui::TextEx(txt, txt + logLine->str.len);
+
+            ImGui::PopID();
+        }
 
         ImGui::EndChild();
 
-        splitter("##region_left_splitter_v", state->ySplitLeft, false);
+        splitter("##region_left_splitter_v", &state->ySplitLeft, false);
 
         ImGui::BeginChild("region_left_bot", ImVec2(state->xSplit, 0));
         ImGui::Text("Bot Left");
@@ -142,7 +160,8 @@ static void gui(State* state) {
         ImGui::EndChild();
 
         ImGui::SameLine();
-        splitter("##region_splitter_h", state->xSplit, true);
+        splitter("##region_splitter_h", &widthLeft, true);
+        state->xSplit = windowSize.x - widthLeft;
 
         ImGui::SameLine();
 
@@ -150,10 +169,18 @@ static void gui(State* state) {
 
         ImGui::BeginChild("region_right_top", ImVec2(0, state->ySplitRight));
         ImGui::Text("Top Right");
+        if (ImGui::Button("log.txt")) {
+            concatPaths(filePath, appState->exePath, "../log.txt");
+            state->pendingFile = filePath;
+        }
+        if (ImGui::Button("log_big.txt")) {
+            concatPaths(filePath, appState->exePath, "../log_big.txt");
+            state->pendingFile = filePath;
+        }
 
         ImGui::EndChild();
 
-        splitter("##region_right_splitter_v", state->ySplitRight, false);
+        splitter("##region_right_splitter_v", &state->ySplitRight, false);
 
         ImGui::BeginChild("region_right_bot", ImVec2(0, 0));
         ImGui::Text("Bot Right");
@@ -173,6 +200,7 @@ static void gui(State* state) {
 static char fetchLineBuffer[4 * 1024];
 static char* fetchLine(FILE* stream, uint32_t* lengthOut) {
     if (stream == NULL) {
+        *lengthOut = 0;
         return NULL;
     }
 
@@ -182,6 +210,7 @@ static char* fetchLine(FILE* stream, uint32_t* lengthOut) {
         size_t count = fread(&c, 1, 1, stream);
         if (count != 1) {
             if (length == 0) {
+                *lengthOut = 0;
                 return NULL;
             }
 
@@ -235,25 +264,8 @@ static void loadLogFile(State* state) {
         printf("[APP] started fetching file '%s'\n", state->pendingFile);
         state->pendingFile = NULL;
 
-        if (state->logLines.items != NULL) {
-            da_free(&state->logLines);
-        }
-
-        if (state->logLines.items == NULL) {
-            //da_reserve(&state->logLines, 3);
-            //hexdump(stdout, state->logLines.items, state->logLines.capacity * sizeof(LogLine), sizeof(LogLine));
-
-            for (uint32_t i = 0; i < 10; ++i) {
-                LogLine line{ .lineNum = i };
-                da_append(&state->logLines, line);
-            }
-
-            hexdump(stdout, state->logLines.items, 20 * sizeof(LogLine), sizeof(LogLine));
-
-            // hexdump(stdout, state->logLines.items, state->logLines.capacity * sizeof(LogLine), sizeof(LogLine));
-            // da_reserve(&state->logLines, 7);
-            // hexdump(stdout, state->logLines.items, state->logLines.capacity * sizeof(LogLine), sizeof(LogLine));
-        }
+        state->logLines.count = 0;
+        ca_reset(&state->textBuffer);
     }
 
     if (state->file != NULL) {
@@ -261,10 +273,26 @@ static void loadLogFile(State* state) {
         char* line = NULL;
         float elapsedTime = 0.f;
 
+        int lineNum = 1;
+        if (state->logLines.count > 0) {
+            lineNum = state->logLines.items[state->logLines.count - 1].lineNum + 1;
+        }
         int lines = 0;
         while (elapsedTime < 5.f) {
             TIME_SCOPE(fetchLineTimer) {
                 line = fetchLine(state->file, &length);
+
+                if (length > 0) {
+                    if (lineNum == 61) {
+                        printf("WTF\n");
+                    }
+                    LogLine* logLine = da_append_get(&state->logLines);
+                    logLine->lineNum = lineNum;
+                    logLine->str.txt = ca_commit(&state->textBuffer, line);
+                    logLine->str.len = length;
+                }
+
+                ++lineNum;
                 ++lines;
             }
 
@@ -284,6 +312,8 @@ static void loadLogFile(State* state) {
 
             state->file = NULL;
             printf("[APP] finished fetching file\n");
+
+            ca_dump(stdout, &state->textBuffer);
         }
     }
 }
@@ -314,7 +344,6 @@ static State* getStateMemory(AppState* state) {
     return (State*)state->stateMemory;
 }
 
-char filePath[PATH_MAX];
 
 extern "C" void app_main(AppState* appState) {
     State* state = NULL;
@@ -324,12 +353,7 @@ extern "C" void app_main(AppState* appState) {
 
         ImGui::SetCurrentContext(appState->context);
 
-        gui(state);
-    }
-
-    if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
-        concatPaths(filePath, appState->exePath, "../log.txt");
-        state->pendingFile = filePath;
+        gui(appState, state);
     }
 
     loadLogFile(state);

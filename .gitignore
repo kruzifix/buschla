@@ -2,5 +2,5 @@ build/
 .vscode/
 
 imgui.ini
-log.txt
+log*
 tmp*
