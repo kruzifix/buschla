@@ -31,7 +31,7 @@ EXE = $(BUILD_DIR)/buschla
 .PHONY: all
 all: $(EXE) $(APP_LIB)
 	cp DroidSansMono.ttf $(BUILD_DIR)/font.ttf
-	@echo Finished building BUSCHLA!
+	@printf '\033[32;1mFinished building BUSCHLA!\033[0m\n'
 
 .PHONY: app
 app: $(APP_LIB)
@@ -56,6 +56,7 @@ $(IMGUI_SRC_UNITY): $(IMGUI_SRC_FILES) $(BUILD_DIR)
 
 EXE_SRC =  util
 EXE_SRC += directory_watcher
+EXE_SRC += dynamic_array
 EXE_SRC += main
 
 EXE_SRC_UNITY = $(BUILD_DIR)/unity_buschla.cpp

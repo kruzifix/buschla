@@ -13,17 +13,11 @@
 #define SPLIT_MIN_CONTENT_SIZE 100.f
 
 typedef struct {
-    char* txt;
-    uint32_t len;
-} StrView;
-
-typedef struct {
     uint32_t lineNum;
     StrView str;
 } LogLine;
 
 DEFINE_DYNAMIC_ARRAY(LogLines, LogLine)
-DEFINE_DYNAMIC_ARRAY(Chars, char)
 
 // NOTE: The memory for the state is automatically allocated.
 // To ensure compatibility between States when hot-reloading,

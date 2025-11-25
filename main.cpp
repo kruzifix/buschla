@@ -15,6 +15,7 @@
 
 #include "app_interface.h"
 #include "directory_watcher.h"
+#include "dynamic_array.h"
 #include "util.h"
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
@@ -213,13 +214,37 @@ static void drawHotReloadStatusWindow(AppState* state) {
 }
 #endif
 
+static int runCmd(const char* cmd) {
+    printf("[BUSCHLA] Running cmd '%s' ...", cmd);
+    int code = system(cmd);
+    printf(" returned %d\n", code);
+    return code;
+}
+
 int main(int argc, char** argv) {
+    Chars chars;
+    memset(&chars, 0, sizeof(Chars));
+
+    char strBuffer[PATH_MAX];
+
     AppState state;
     state.stateMemory = NULL;
     state.stateMemorySize = 0;
-    bool exePathRet = getExecutablePath(argv[0], state.exePath);
+    bool exePathRet = getExecutablePath(argv[0], strBuffer);
     assert(exePathRet);
-    splitAtLastOccurence(state.exePath, '/');
+    splitAtLastOccurence(strBuffer, '/');
+
+    // NOTE: All this string manipulation with the paths makes me nervous.
+    // Especially because for hot-reloading we run rm commands.
+    // So lets just plop an assert here to make sure our buffers are never overrun
+    {
+        size_t exePathLen = strlen(strBuffer);
+        // Worst case is us running cp %s %s.
+        assert(exePathLen < (PATH_MAX / 3));
+    }
+
+    state.exePath = ca_commit(&chars, strBuffer);
+    printf("[BUSCHLA] exePath: '%s'\n", state.exePath);
 
 #ifdef ENABLE_HOT_RELOADING
     DirWatcherState watcherState;
@@ -302,32 +327,46 @@ int main(int argc, char** argv) {
 
 #ifdef ENABLE_HOT_RELOADING
 
-    char tmpPath[PATH_MAX];
-    concatPaths(tmpPath, state.exePath, "/tmp");
+    concatPaths(strBuffer, state.exePath, "/tmp");
+    const char* tmpPath = ca_commit(&chars, strBuffer);
+    printf("[BUSCHLA] tmpPath: '%s'\n", tmpPath);
 
-    char cmdBuffer[PATH_MAX];
-    snprintf(cmdBuffer, sizeof(cmdBuffer), "rm -rf %s", tmpPath);
-    system(cmdBuffer);
-    snprintf(cmdBuffer, sizeof(cmdBuffer), "mkdir %s", tmpPath);
-    system(cmdBuffer);
+    // TODO: This is kinda dangerous. if the path is cut off, it could be that we remove something unrelated!
+    snprintf(strBuffer, sizeof(strBuffer), "rm -rf %s", tmpPath);
+    runCmd(strBuffer);
+    snprintf(strBuffer, sizeof(strBuffer), "mkdir %s", tmpPath);
+    runCmd(strBuffer);
 
-    char appLibraryPath[PATH_MAX];
-    concatPaths(appLibraryPath, state.exePath, "app.so");
+    concatPaths(strBuffer, state.exePath, "app.so");
+    const char* appLibraryPath = ca_commit(&chars, strBuffer);
+    printf("[BUSCHLA] appLibraryPath: '%s'\n", appLibraryPath);
 
-    int tmpLibraryId = 0;
+    typedef struct {
+        const char* tmpPath;
+        const char* cmdCopyToTmp;
+        const char* cmdRemoveTmp;
+    } HotReloadData;
 
-    char tmpLibraryPath[PATH_MAX];
-    snprintf(tmpLibraryPath, sizeof(tmpLibraryPath), "%s/tmp%04d", tmpPath, tmpLibraryId);
+    HotReloadData hotReloadData[2];
+    for (int i = 0; i < 2; ++i) {
+        snprintf(strBuffer, sizeof(strBuffer), "%s/tmp%d", tmpPath, i);
+        hotReloadData[i].tmpPath = ca_commit(&chars, strBuffer);
 
-    snprintf(cmdBuffer, sizeof(cmdBuffer), "cp %s %s", appLibraryPath, tmpLibraryPath);
-    system(cmdBuffer);
+        snprintf(strBuffer, sizeof(strBuffer), "cp %s %s", appLibraryPath, hotReloadData[i].tmpPath);
+        hotReloadData[i].cmdCopyToTmp = ca_commit(&chars, strBuffer);
+    }
+
+    int currentTmpLibraryIndex = 0;
+    runCmd(hotReloadData[currentTmpLibraryIndex].cmdCopyToTmp);
 
     AppLibraryState appLibrary;
-    if (!tryLoadAppLibrary(tmpLibraryPath, &appLibrary)) {
+    if (!tryLoadAppLibrary(hotReloadData[currentTmpLibraryIndex].tmpPath, &appLibrary)) {
         fprintf(stderr, "%s\n", dlerror());
         exit(1);
     }
 #endif
+
+    ca_dump(stdout, &chars);
 
     float lastTime = ImGui::GetTime();
     bool done = false;
@@ -359,53 +398,43 @@ int main(int argc, char** argv) {
                     printf("[BUSCHLA] file changed: %s\n", watcherEvent.fileChanged.paths[i]);
                 }
             }
+
+            // TODO: BLÄH, this could be cleaner, right?
             if (watcherEvent.type == DIRWATCHER_EVENT_REACTION_REPORT) {
                 printf("[BUSCHLA] reaction finished with code %d and msg:\n%s\n",
                     watcherEvent.reactionReport.exitStatus,
                     watcherEvent.reactionReport.statusMsg);
 
-                // TODO: should we check the modified date of the app.so to determine if we should really reload?
                 if (watcherEvent.reactionReport.exitStatus == 0) {
-                    TIME_SCOPE(hotReloadTimer) {
-                        ++tmpLibraryId;
-                        char newTmpLibraryPath[PATH_MAX];
-                        snprintf(newTmpLibraryPath, sizeof(newTmpLibraryPath), "%s/tmp%04d", tmpPath, tmpLibraryId);
+                    int nextTmpLibraryIndex = (currentTmpLibraryIndex + 1) % 2;
 
-                        snprintf(cmdBuffer, sizeof(cmdBuffer), "cp %s %s", appLibraryPath, newTmpLibraryPath);
-                        // TODO: check exit status!
-                        system(cmdBuffer);
-
+                    int copyCmdStatus = runCmd(hotReloadData[nextTmpLibraryIndex].cmdCopyToTmp);
+                    if (copyCmdStatus == 0) {
                         AppLibraryState newAppLibrary;
-                        if (tryLoadAppLibrary(newTmpLibraryPath, &newAppLibrary)) {
+                        if (tryLoadAppLibrary(hotReloadData[nextTmpLibraryIndex].tmpPath, &newAppLibrary)) {
                             unloadAppLibrary(&appLibrary);
-                            // TODO: should we delete the old tmp library here?
+
                             appLibrary.handle = newAppLibrary.handle;
                             appLibrary.app_main = newAppLibrary.app_main;
+                            currentTmpLibraryIndex = nextTmpLibraryIndex;
 
-                            snprintf(cmdBuffer, sizeof(cmdBuffer), "rm %s", tmpLibraryPath);
-                            // TODO: check exit status!
-                            system(cmdBuffer);
-
-                            memcpy(tmpLibraryPath, newTmpLibraryPath, sizeof(tmpLibraryPath));
-
+                            printf("%s[BUSCHLA] Successfully replaced app library!%s\n", TERM_COL_GREEN_BOLD, TERM_COL_CLEAR);
                             triggerHotReloadStatus(true, watcherEvent.reactionReport.statusMsg);
-
-                            printf("%s[BUSCHLA] Successfully replaced app library!\n", TERM_COL_GREEN_BOLD);
-                            printf(TERM_COL_CLEAR);
                         }
                         else {
                             char* errorString = dlerror();
-                            fprintf(stderr, "%s\n", errorString);
+                            printf("%s[BUSCHLA] Error loading app library: %s%s\n", TERM_COL_RED_BOLD, errorString, TERM_COL_CLEAR);
                             triggerHotReloadStatus(false, errorString);
                         }
                     }
-
-                    printf("[BUSCHLA] Hot-Reload took %.3fms\n", hotReloadTimer.elapsedMs);
+                    else {
+                        const char* msg = "Unable to copy app.so to a tmp location!";
+                        printf("%s[BUSCHLA] %s%s\n", TERM_COL_RED_BOLD, msg, TERM_COL_CLEAR);
+                        triggerHotReloadStatus(false, msg);
+                    }
                 }
                 else {
-                    printf("%s[BUSCHLA] Unable to reload app library!\n", TERM_COL_RED_BOLD);
-                    printf(TERM_COL_CLEAR);
-
+                    printf("%s[BUSCHLA] Unable to reload app library!%s\n", TERM_COL_RED_BOLD, TERM_COL_CLEAR);
                     triggerHotReloadStatus(false, watcherEvent.reactionReport.statusMsg);
                 }
             }
@@ -477,8 +506,9 @@ int main(int argc, char** argv) {
 
     DirWatcher_Shutdown(&watcherState);
 
-    snprintf(cmdBuffer, sizeof(cmdBuffer), "rm -rf %s", tmpPath);
-    system(cmdBuffer);
+    // TODO: DANGEROUS!
+    snprintf(strBuffer, sizeof(strBuffer), "rm -rf %s", tmpPath);
+    runCmd(strBuffer);
 #endif
 
     SDL_WaitForGPUIdle(gpu_device);

@@ -6,7 +6,7 @@
 
 struct AppState
 {
-    char exePath[PATH_MAX];
+    const char* exePath;
 
     ImGuiContext* context;
     float time;

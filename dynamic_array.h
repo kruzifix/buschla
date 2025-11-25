@@ -2,13 +2,6 @@
 
 #include <stdint.h>
 
-
-// TODO: What about a ChunkArray ?
-// On the top level we have a dynamic array of pointers to memory blocks
-// each block is the same power-of-2 size
-// the requested index can then be split into a global and local index by bit shifting & and-ing
-
-
 #define DEFINE_DYNAMIC_ARRAY(name, type) typedef struct { \
     type* items; \
     uint32_t count; \
@@ -33,3 +26,25 @@ void _da_reserve(_DummyDynamicArray* array, uint32_t itemSize, uint32_t requeste
 void _da_free(_DummyDynamicArray* array, uint32_t itemSize);
 void _da_append(_DummyDynamicArray* array, uint32_t itemSize, void* item);
 
+
+// --------------------------------- CHUNK ARRAY --------------------------------- //
+// On the top level we have a dynamic array of pointers to memory blocks.
+// Each block is the same power-of-2 size
+// When indexing into the chunk array the requested index can then be split into a global and local index
+// by bit shifting & and-ing.
+
+// NOTE: For now lets just make a string oriented chunk array! we can always generalize if needed.
+#define CHARS_CHUNK_SIZE 4096
+
+typedef struct {
+    char* content;
+    // "Points" to next free byte (i.e. stores how much space is occupied)
+    uint32_t count;
+} CharsChunk;
+
+DEFINE_DYNAMIC_ARRAY(Chars, CharsChunk)
+
+char* ca_commit(Chars* chars, const char* str);
+char* ca_commit_view(Chars* chars, StrView view);
+
+void ca_dump(FILE* stream, Chars* chars);

@@ -10,6 +10,11 @@ typedef struct {
     int writeFd;
 } Pipe;
 
+typedef struct {
+    const char* txt;
+    uint32_t len;
+} StrView;
+
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(*a))
 
 #define TODO(msg) (assert(false && #msg))
