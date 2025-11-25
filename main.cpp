@@ -390,7 +390,8 @@ int main(int argc, char** argv) {
 
                             triggerHotReloadStatus(true, watcherEvent.reactionReport.statusMsg);
 
-                            printf("[BUSCHLA] Successfully replaced app library!\n");
+                            printf("%s[BUSCHLA] Successfully replaced app library!\n", TERM_COL_GREEN_BOLD);
+                            printf(TERM_COL_CLEAR);
                         }
                         else {
                             char* errorString = dlerror();
@@ -402,6 +403,9 @@ int main(int argc, char** argv) {
                     printf("[BUSCHLA] Hot-Reload took %.3fms\n", hotReloadTimer.elapsedMs);
                 }
                 else {
+                    printf("%s[BUSCHLA] Unable to reload app library!\n", TERM_COL_RED_BOLD);
+                    printf(TERM_COL_CLEAR);
+
                     triggerHotReloadStatus(false, watcherEvent.reactionReport.statusMsg);
                 }
             }

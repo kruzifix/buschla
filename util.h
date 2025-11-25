@@ -52,7 +52,7 @@ char* splitAtLastOccurence(char* src, char c);
 // returns return value of realpath, check errno if this returned false!
 bool concatPaths_(char* dest, const char* paths[], int count);
 
-void hexdump(FILE* stream, void* memory, size_t size);
+void hexdump(FILE* stream, void* memory, size_t size, size_t itemSize = 0);
 
 typedef struct {
     uint64_t begin;

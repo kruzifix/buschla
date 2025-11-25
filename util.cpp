@@ -100,29 +100,60 @@ static void _hexdump_printChars(FILE* stream, void* memory, size_t count) {
     }
 }
 
-void hexdump(FILE* stream, void* memory, size_t size) {
-    fprintf(stream, "dumping memory at %p  size: %ld\n", memory, size);
-    fprintf(stream, "     ");
-    for (int i = 0; i < 16; ++i) {
+void hexdump(FILE* stream, void* memory, size_t size, size_t itemSize) {
+    fprintf(stream, "dumping memory at %s%p%s  size: %ld (0x%lX)\n", TERM_COL_GREEN_BOLD, memory, TERM_COL_CLEAR, size, size);
+    if (size > 0xFFFF) {
+        fputs(TERM_COL_RED_BOLD, stream);
+        fprintf(stream, "  WARNING! hexdump() currently only supports 16-bits for the size,\n    truncating the size to 0xFFFF\n");
+        fputs(TERM_COL_CLEAR, stream);
+
+        size = 0xFFFF;
+    }
+
+    fputs("     ", stream);
+    fputs(TERM_COL_WHITE_BOLD, stream);
+    const int rowSize = 16;
+    for (int i = 0; i < rowSize; ++i) {
         fprintf(stream, "%02X ", i);
     }
+    fputs(TERM_COL_CLEAR, stream);
+
+    size_t sizeRemainder = size % rowSize;
     for (size_t i = 0; i < size; ++i) {
-        if (i % 16 == 0) {
-            if (i > 0) {
-                _hexdump_printChars(stream, ((char*)memory) + (i - 16), 16);
-            }
+        if (i % rowSize == 0) {
             // TODO: check size to determine how many digits the address is at maximum
-            fprintf(stream, "\n%04ld ", i);
+            fprintf(stream, "\n%s%04lX%s ", TERM_COL_RED_BOLD, i, TERM_COL_CLEAR);
+        }
+
+        bool setColor = true;
+        if (itemSize > 0) {
+            int itemIndex = i / itemSize;
+            fprintf(stream, "\033[%d;%dm", 32 + (itemIndex % 6), 2 + 2 * (itemIndex % 2));
         }
         fprintf(stream, "%02X ", ((uint8_t*)memory)[i]);
-    }
-    size_t remainder = size % 16;
-    if (remainder > 0) {
-        for (size_t i = 0; i < 16 - remainder; ++i) {
-            fprintf(stream, "   ");
+        if (setColor) {
+            fputs(TERM_COL_CLEAR, stream);
         }
-        _hexdump_printChars(stream, ((char*)memory) + (size - remainder), remainder);
+
+        bool atEndOfMemory = i == size - 1;
+        bool atEndOfRow = (i % rowSize) == (rowSize - 1);
+
+        if (atEndOfMemory) {
+            if (sizeRemainder == 0) {
+                _hexdump_printChars(stream, ((char*)memory) + (i - rowSize), rowSize);
+            }
+            else {
+                for (size_t i = 0; i < rowSize - sizeRemainder; ++i) {
+                    fputs("   ", stream);
+                }
+                _hexdump_printChars(stream, ((char*)memory) + (size - sizeRemainder), sizeRemainder);
+            }
+        }
+        else if (atEndOfRow) {
+            _hexdump_printChars(stream, ((char*)memory) + (i - rowSize), rowSize);
+        }
     }
+
     putc('\n', stream);
 }
 

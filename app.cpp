@@ -241,9 +241,25 @@ static void loadLogFile(State* state) {
         printf("[APP] started fetching file '%s'\n", state->pendingFile);
         state->pendingFile = NULL;
 
-        // if (state->logLines.items == NULL) {
-        //     da_reserve(&state->logLines, 512);
-        // }
+        if (state->logLines.items != NULL) {
+            da_free(&state->logLines);
+        }
+
+        if (state->logLines.items == NULL) {
+            //da_reserve(&state->logLines, 3);
+            //hexdump(stdout, state->logLines.items, state->logLines.capacity * sizeof(LogLine), sizeof(LogLine));
+
+            for (uint32_t i = 0; i < 10; ++i) {
+                LogLine line{ .lineNum = i };
+                da_append(&state->logLines, line);
+            }
+
+            hexdump(stdout, state->logLines.items, 20 * sizeof(LogLine), sizeof(LogLine));
+
+            // hexdump(stdout, state->logLines.items, state->logLines.capacity * sizeof(LogLine), sizeof(LogLine));
+            // da_reserve(&state->logLines, 7);
+            // hexdump(stdout, state->logLines.items, state->logLines.capacity * sizeof(LogLine), sizeof(LogLine));
+        }
     }
 
     if (state->file != NULL) {
