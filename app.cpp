@@ -283,9 +283,6 @@ static void loadLogFile(State* state) {
                 line = fetchLine(state->file, &length);
 
                 if (length > 0) {
-                    if (lineNum == 61) {
-                        printf("WTF\n");
-                    }
                     LogLine* logLine = da_append_get(&state->logLines);
                     logLine->lineNum = lineNum;
                     logLine->str.txt = ca_commit(&state->textBuffer, line);
@@ -313,7 +310,7 @@ static void loadLogFile(State* state) {
             state->file = NULL;
             printf("[APP] finished fetching file\n");
 
-            ca_dump(stdout, &state->textBuffer);
+            //ca_dump(stdout, &state->textBuffer);
         }
     }
 }
@@ -343,7 +340,6 @@ static State* getStateMemory(AppState* state) {
 
     return (State*)state->stateMemory;
 }
-
 
 extern "C" void app_main(AppState* appState) {
     State* state = NULL;
