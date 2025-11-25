@@ -71,7 +71,6 @@ typedef struct {
 
     bool success;
     // NOTE: this points to a strdup-ed string and is freed on re-trigger
-    // TODO: allocate buffer once?
     char* msg;
 } HotReloadStatusWindow;
 

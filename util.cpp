@@ -71,6 +71,7 @@ bool concatPaths_(char* dest, const char* paths[], int count) {
             ++path;
         }
 
+        // TODO: Check we dont run out of bounds!
         size_t len = getStringLength(path);
         if (len == 0) {
             continue;
@@ -121,7 +122,6 @@ void hexdump(FILE* stream, void* memory, size_t size, size_t itemSize) {
     size_t sizeRemainder = size % rowSize;
     for (size_t i = 0; i < size; ++i) {
         if (i % rowSize == 0) {
-            // TODO: check size to determine how many digits the address is at maximum
             fprintf(stream, "\n%s%04lX%s ", TERM_COL_RED_BOLD, i, TERM_COL_CLEAR);
         }
 
