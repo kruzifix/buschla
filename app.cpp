@@ -58,6 +58,31 @@ static void splitter(const char* label, float* splitValue, bool horizontal) {
     }
 }
 
+struct ScopedStyleVar {
+    ScopedStyleVar(ImGuiStyleVar idx, const float value) {
+        ImGui::PushStyleVar(idx, value);
+    }
+
+    ScopedStyleVar(ImGuiStyleVar idx, const ImVec2& value) {
+        ImGui::PushStyleVar(idx, value);
+    }
+
+    ScopedStyleVar(ImGuiStyleVar idx, float x, float y) {
+        ImGui::PushStyleVar(idx, ImVec2(x, y));
+    }
+
+    ~ScopedStyleVar() {
+        ImGui::PopStyleVar();
+    }
+};
+
+#define CAT_(a, b) a ## b
+#define CAT(a, b) CAT_(a, b)
+#define UNIQUE_NAME(prefix) CAT(prefix, __LINE__)
+
+#define SCOPE_STYLE(name, value) ScopedStyleVar UNIQUE_NAME(_scopeStyleVar_)((name), (value))
+#define SCOPE_STYLE2(name, x, y) ScopedStyleVar UNIQUE_NAME(_scopeStyleVar_)((name), (x), (y))
+
 char filePath[PATH_MAX];
 
 static void gui(AppState* appState, State* state) {
@@ -120,47 +145,36 @@ static void gui(AppState* appState, State* state) {
             state->ySplitRight = windowSize.y * .5f;
         }
 
-        // TODO: Create RAII objs to handle this nicely.
-#define STYLE_VAR(name, value)                \
-    {                                         \
-        ImGui::PushStyleVar((name), (value)); \
-        ++styleVars;                          \
-    }
-#define STYLE_VAR2(name, x, y)                         \
-    {                                                  \
-        ImGui::PushStyleVar((name), ImVec2((x), (y))); \
-        ++styleVars;                                   \
-    }
-
-        int styleVars = 0;
-        STYLE_VAR2(ImGuiStyleVar_ItemSpacing, 0.f, 0.f);
-        STYLE_VAR(ImGuiStyleVar_ChildBorderSize, 0.f);
+        SCOPE_STYLE2(ImGuiStyleVar_ItemSpacing, 0.f, 0.f);
+        SCOPE_STYLE(ImGuiStyleVar_ChildBorderSize, 0.f);
 
         float widthLeft = windowSize.x - state->xSplit;
         ImGui::BeginChild("region_left", ImVec2(widthLeft, 0.f), ImGuiChildFlags_Borders);
 
         ImGui::BeginChild("region_left_top", ImVec2(widthLeft, state->ySplitLeft),
             0, ImGuiWindowFlags_HorizontalScrollbar);
-        // TODO: Inside the regions we do probably want ItemSpacing!!!
+        {
+            for (uint32_t i = 0; i < state->logLines.count; ++i) {
+                ImGui::PushID(i);
 
-        for (uint32_t i = 0; i < state->logLines.count; ++i) {
-            ImGui::PushID(i);
+                LogLine* logLine = state->logLines.items + i;
+                // TODO: determine width of line num with line count!
+                ImGui::Text("%6d", logLine->lineNum);
+                ImGui::SameLine(0.f, 4.f);
+                const char* txt = logLine->str.txt;
+                ImGui::TextEx(txt, txt + logLine->str.len);
 
-            LogLine* logLine = state->logLines.items + i;
-            ImGui::Text("%5d", logLine->lineNum);
-            ImGui::SameLine(0.f, 4.f);
-            const char* txt = logLine->str.txt;
-            ImGui::TextEx(txt, txt + logLine->str.len);
-
-            ImGui::PopID();
+                ImGui::PopID();
+            }
         }
-
         ImGui::EndChild();
 
         splitter("##region_left_splitter_v", &state->ySplitLeft, false);
 
         ImGui::BeginChild("region_left_bot", ImVec2(state->xSplit, 0));
-        ImGui::Text("Bot Left");
+        {
+            ImGui::Text("Bot Left");
+        }
         ImGui::EndChild();
 
         ImGui::EndChild();
@@ -174,30 +188,30 @@ static void gui(AppState* appState, State* state) {
         ImGui::BeginChild("region_right", ImVec2(0.f, 0.f), ImGuiChildFlags_Borders);
 
         ImGui::BeginChild("region_right_top", ImVec2(0, state->ySplitRight));
-        ImGui::Text("Top Right");
-        if (ImGui::Button("log.txt")) {
-            // TODO: REFACTOR
-            //concatPaths(filePath, appState->exePath, "../log.txt");
-            snprintf(filePath, sizeof(filePath), "%s/../log.txt", appState->exePath);
-            state->pendingFile = filePath;
-        }
-        if (ImGui::Button("log_big.txt")) {
-            // TODO: REFACTOR
-            //concatPaths(filePath, appState->exePath, "../log_big.txt");
-            snprintf(filePath, sizeof(filePath), "%s/../log_big.txt", appState->exePath);
-            state->pendingFile = filePath;
-        }
+        {
+            SCOPE_STYLE2(ImGuiStyleVar_ItemSpacing, 5.f, 5.f);
 
+            ImGui::Text("Top Right");
+            if (ImGui::Button("log.txt")) {
+                snprintf(filePath, sizeof(filePath), "%s/../log.txt", appState->exePath);
+                state->pendingFile = filePath;
+            }
+            if (ImGui::Button("log_big.txt")) {
+                snprintf(filePath, sizeof(filePath), "%s/../log_big.txt", appState->exePath);
+                state->pendingFile = filePath;
+            }
+        }
         ImGui::EndChild();
 
         splitter("##region_right_splitter_v", &state->ySplitRight, false);
 
         ImGui::BeginChild("region_right_bot", ImVec2(0, 0));
-        ImGui::Text("Bot Right");
+        {
+            ImGui::Text("Bot Right");
+        }
         ImGui::EndChild();
 
         ImGui::EndChild();
-        ImGui::PopStyleVar(styleVars);
     }
     ImGui::End();
 }
@@ -207,8 +221,7 @@ static void gui(AppState* appState, State* state) {
 // If EOF or an error occured while reading, NULL is returned instead.
 // TODO: For now we cut off any line longer than 4K characters.
 // Is that an ok assumption to make?  ¯\_(ツ)_/¯
-// TODO: This could also use a buffer allocated inside the function
-// which grows on demand
+// TODO: This could also use a buffer allocated inside the function which grows on demand
 static char fetchLineBuffer[4 * 1024];
 static char* fetchLine(FILE* stream, uint32_t* lengthOut) {
     if (stream == NULL) {
