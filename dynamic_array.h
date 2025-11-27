@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#include "util.h"
+
 #define DEFINE_DYNAMIC_ARRAY(name, type) typedef struct { \
     type* items; \
     uint32_t count; \

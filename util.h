@@ -1,8 +1,8 @@
 #pragma once
 
-#include <bits/types/FILE.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <time.h>
 
 typedef struct {
@@ -48,6 +48,8 @@ bool getExecutablePath(const char* callingPath, char* dest);
 // Returns pointer to first character after last occurence of 'c', NULL on error (no 'c' found).
 char* splitAtLastOccurence(char* src, char c);
 
+#ifdef LINUX
+// TODO: Maybe we just entirely get rid of this and use snprintf
 // NOTE: concatPaths uses 'realpath' internally, which means this only works with actually existing paths!
 // TODO: replace usage of 'realpath' so we can work with any directories (also imaginary trees)!
 #define concatPaths(dest, ...) \
@@ -56,6 +58,7 @@ char* splitAtLastOccurence(char* src, char c);
 // Assumes dest points to a buffer that is big enough (i.e. atleast PATH_MAX)!
 // returns return value of realpath, check errno if this returned false!
 bool concatPaths_(char* dest, const char* paths[], int count);
+#endif
 
 void hexdump(FILE* stream, void* memory, size_t size, size_t itemSize = 0);
 

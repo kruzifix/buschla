@@ -1,15 +1,24 @@
 // Skeleton taken from imgui sdl3_sdlgpu3 example
 
+#ifdef WINDOWS
+#define PATH_MAX 4096
+#else
+#define ENABLE_HOT_RELOADING
+#endif
+
+#ifdef ENABLE_HOT_RELOADING
 #include <dlfcn.h>
+#include <sys/sendfile.h>
+#include <unistd.h>
+#endif
+
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/sendfile.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
 #include <SDL3/SDL.h>
 
@@ -22,7 +31,9 @@
 #include "imgui/imgui_impl_sdl3.h"
 #include "imgui/imgui_impl_sdlgpu3.h"
 
-#define ENABLE_HOT_RELOADING
+#ifndef ENABLE_HOT_RELOADING
+#include "app.cpp"
+#endif
 
 // TODO: How can we also build this to statically link the app layer?
 // because we need the code hot reloading really only for dev on linux
@@ -319,9 +330,10 @@ int main(int argc, char** argv) {
     init_info.PresentMode = SDL_GPU_PRESENTMODE_VSYNC;
     ImGui_ImplSDLGPU3_Init(&init_info);
 
-    char fontPath[PATH_MAX];
-    concatPaths(fontPath, state.exePath, "/font.ttf");
-    ImFont* font = io.Fonts->AddFontFromFileTTF(fontPath);
+    // TODO: remove concatPaths and make a nice wrapper for snprintf and static buffer!
+    //concatPaths(strBuffer, state.exePath, "/font.ttf");
+    snprintf(strBuffer, sizeof(strBuffer), "%s/font.ttf", state.exePath);
+    ImFont* font = io.Fonts->AddFontFromFileTTF(strBuffer);
     IM_ASSERT(font != NULL);
 
 #ifdef ENABLE_HOT_RELOADING
@@ -457,7 +469,7 @@ int main(int argc, char** argv) {
         drawHotReloadStatusWindow(&state);
 
 #else
-#error "TODO: If we are not hot reloading, we should statically link app_main!"
+        app_main(&state);
 #endif
 
         //ImGui::PopFont();

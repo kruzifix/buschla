@@ -1,14 +1,24 @@
 #include "util.h"
 
+#ifdef WINDOWS
+#define PATH_MAX 4096
+#include <direct.h>
+#else
+#include <unistd.h>
+#endif
+
 #include <assert.h>
 #include <limits.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 #include <stdint.h>
 
 #include <SDL3/SDL.h>
+
+// FIXME: Maybe its nicer to have a util_linx.cpp and util_windows.cpp
+// which implement the platform variations of functions?
+// for now we only have one such function, so maybe revisit when we have more!
 
 size_t getStringLength(const char* str) {
     if (str == NULL) {
@@ -18,6 +28,7 @@ size_t getStringLength(const char* str) {
     return strlen(str);
 }
 
+#ifdef LINUX
 bool getExecutablePath(const char* callingPath, char* dest) {
     // TODO: do actual checking of the path sizes!
     // if callingPath or the concatenation of workingDirector + callingPath is bigger then PATH_MAX,
@@ -43,6 +54,30 @@ bool getExecutablePath(const char* callingPath, char* dest) {
 
     return realpath(path, dest) != NULL;
 }
+#else
+bool getExecutablePath(const char* callingPath, char* dest) {
+    char workingDirectory[PATH_MAX];
+    if (_getcwd(workingDirectory, sizeof(workingDirectory)) == NULL) {
+        return false;
+    }
+
+    // TODO: This is making a bunch of assumptions ....
+    // needs to be reworked!
+    strcpy(dest, workingDirectory);
+    strcat(dest, "/");
+    strcat(dest, callingPath);
+
+    char* p = dest;
+    while (*p) {
+        if (*p == '\\') {
+            *p = '/';
+        }
+        ++p;
+    }
+
+    return true;
+}
+#endif
 
 char* splitAtLastOccurence(char* src, char c) {
     char* p = src;
@@ -62,6 +97,7 @@ char* splitAtLastOccurence(char* src, char c) {
     return NULL;
 }
 
+#ifdef LINUX
 bool concatPaths_(char* dest, const char* paths[], int count) {
     char buffer[PATH_MAX];
     char* p = buffer;
@@ -92,6 +128,7 @@ bool concatPaths_(char* dest, const char* paths[], int count) {
 
     return realpath(buffer, dest) != NULL;
 }
+#endif
 
 static void _hexdump_printChars(FILE* stream, void* memory, size_t count) {
     for (size_t i = 0; i < count; ++i) {

@@ -1,6 +1,8 @@
 build/
+*.pdb
 .vscode/
 
 imgui.ini
 log*
 tmp*
+*.patch

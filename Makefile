@@ -2,12 +2,15 @@
 # SDL3-devel package needs to be installed
 # For Windows build see build_win64.bat
 
+# TODO: Refactor this horrible mess with nob.h!!!!
+
 COMPILER = g++
 #COMPILER = clang++
 
 CFLAGS =  -std=c++11
 CFLAGS += -ggdb
 CFLAGS += -Wall
+CFLAGS += -DLINUX
 #CFLAGS += -Wformat
 CFLAGS += `pkg-config sdl3 --cflags`
 

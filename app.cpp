@@ -102,11 +102,17 @@ static void gui(AppState* appState, State* state) {
     bool open = true;
     if (ImGui::Begin("Fullscreen Window", &open, flags)) {
         ImVec2 windowSize = ImGui::GetWindowSize();
+
+        // TODO: Also handle the case where the split value is bigger than the window size!
+        // (can happen if the window is resized to be smaller)
+
         // TODO: When window is resized, we kinda want the right section to stay the same size, right?
         // That means we need to store the width of the right section, instead of the left.
         if (state->xSplit <= 0.f) {
             state->xSplit = 300.f;
         }
+        // TODO: Do we want the bottom left section to always stay the same size?
+        // Then this would need to be inverted just like we do for the xSplit!
         if (state->ySplitLeft <= 0.f) {
             state->ySplitLeft = windowSize.y * .5f;
         }
@@ -170,11 +176,15 @@ static void gui(AppState* appState, State* state) {
         ImGui::BeginChild("region_right_top", ImVec2(0, state->ySplitRight));
         ImGui::Text("Top Right");
         if (ImGui::Button("log.txt")) {
-            concatPaths(filePath, appState->exePath, "../log.txt");
+            // TODO: REFACTOR
+            //concatPaths(filePath, appState->exePath, "../log.txt");
+            snprintf(filePath, sizeof(filePath), "%s/../log.txt", appState->exePath);
             state->pendingFile = filePath;
         }
         if (ImGui::Button("log_big.txt")) {
-            concatPaths(filePath, appState->exePath, "../log_big.txt");
+            // TODO: REFACTOR
+            //concatPaths(filePath, appState->exePath, "../log_big.txt");
+            snprintf(filePath, sizeof(filePath), "%s/../log_big.txt", appState->exePath);
             state->pendingFile = filePath;
         }
 
