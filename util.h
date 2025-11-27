@@ -10,11 +10,6 @@ typedef struct {
     int writeFd;
 } Pipe;
 
-typedef struct {
-    const char* txt;
-    uint32_t len;
-} StrView;
-
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(*a))
 
 #define TODO(msg) (assert(false && #msg))
@@ -37,28 +32,26 @@ typedef struct {
 #define UTF8_IS_START_3BYTE(c) (((c) & 0xF0) == 0xE0)
 #define UTF8_IS_START_4BYTE(c) (((c) & 0xF8) == 0xF0)
 
+// Returns pointer to formatted string.
+// DO NOT free this pointer.
+// DO NOT store this pointer (tmpf will overwrite the contents on subsequent calls).
+char* tmpf(const char* fmt, ...);
 
 size_t getStringLength(const char* str);
 
 // Pass argv[0] to callingPath.
-// Assumes dest points to a buffer that is atleast PATH_MAX big!
-bool getExecutablePath(const char* callingPath, char* dest);
+// Uses tmpf internally, see tmpf for restrictions!
+char* getExecutableFilePath(const char* callingPath);
+
+// Cleans absolute path in place
+// - Removes trailing /
+// - Removes /./
+// - Resolves /../
+bool cleanAbsolutePath(char* path);
 
 // Modifies given 'string', inserts null terminator at last occurence of 'c'.
 // Returns pointer to first character after last occurence of 'c', NULL on error (no 'c' found).
 char* splitAtLastOccurence(char* src, char c);
-
-#ifdef LINUX
-// TODO: Maybe we just entirely get rid of this and use snprintf
-// NOTE: concatPaths uses 'realpath' internally, which means this only works with actually existing paths!
-// TODO: replace usage of 'realpath' so we can work with any directories (also imaginary trees)!
-#define concatPaths(dest, ...) \
-    concatPaths_(dest, ((const char*[]){__VA_ARGS__}), (sizeof((const char*[]){__VA_ARGS__})/sizeof(const char*)))
-
-// Assumes dest points to a buffer that is big enough (i.e. atleast PATH_MAX)!
-// returns return value of realpath, check errno if this returned false!
-bool concatPaths_(char* dest, const char* paths[], int count);
-#endif
 
 void hexdump(FILE* stream, void* memory, size_t size, size_t itemSize = 0);
 

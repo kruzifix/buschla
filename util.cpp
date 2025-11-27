@@ -20,6 +20,46 @@
 // which implement the platform variations of functions?
 // for now we only have one such function, so maybe revisit when we have more!
 
+char* tmpf(const char* fmt, ...) {
+    static char* buffer = NULL;
+    static uint32_t capacity = 0;
+
+    if (fmt == NULL) {
+        return NULL;
+    }
+
+    va_list args;
+    va_start(args, fmt);
+    int requiredSize = vsnprintf(NULL, 0, fmt, args);
+    va_end(args);
+
+    assert(requiredSize >= 0 && "tmpf: first call to vsnprintf returned a negative value");
+
+    uint32_t requiredCapacity = (uint32_t)requiredSize + 1;
+    if (capacity < requiredCapacity) {
+        if (capacity == 0) {
+            const uint32_t initialCapacity = 128;
+            capacity = requiredCapacity < initialCapacity ? initialCapacity : requiredCapacity;
+        }
+        // Grow capacity by 1.5x until we have enough to fit the requirement.
+        while (capacity < requiredCapacity) {
+            capacity += capacity / 2;
+        }
+
+        buffer = (char*)realloc(buffer, capacity);
+        assert(buffer != NULL && "tmpf: realloc failed (buy more RAM? lol!)");
+    }
+
+    va_start(args, fmt);
+    int writtenSize = vsnprintf(buffer, capacity, fmt, args);
+    va_end(args);
+
+    assert(writtenSize >= 0 && "tmpf: second call to vsnprintf returned a negative value");
+    assert(writtenSize == requiredSize);
+
+    return buffer;
+}
+
 size_t getStringLength(const char* str) {
     if (str == NULL) {
         return 0;
@@ -29,33 +69,29 @@ size_t getStringLength(const char* str) {
 }
 
 #ifdef LINUX
-bool getExecutablePath(const char* callingPath, char* dest) {
-    // TODO: do actual checking of the path sizes!
-    // if callingPath or the concatenation of workingDirector + callingPath is bigger then PATH_MAX,
-    // we will write out of bounds!
-    char workingDirectory[PATH_MAX];
-    if (getcwd(workingDirectory, sizeof(workingDirectory)) == NULL) {
-        return false;
-    }
+char* getExecutableFilePath(const char* callingPath) {
+    char* workingDir = get_current_dir_name();
 
     // the callingPath in argv can be
     // - absolute (start with /)
     // - relative (start with ./ or ../)
-    // - relative? (starts without .)
-    char path[PATH_MAX];
+    // - relative? (starts without . or /)
     if (callingPath[0] == '/') {
-        strcpy(path, callingPath);
-    }
-    else {
-        strcpy(path, workingDirectory);
-        strcat(path, "/");
-        strcat(path, callingPath);
+        // yes, I know, its stupid, but its to ensure the same behavior independent of input.
+        return tmpf("%s", callingPath);
     }
 
-    return realpath(path, dest) != NULL;
+    char* tmp = tmpf("%s/%s", workingDir, callingPath);
+    if (!cleanAbsolutePath(tmp)) {
+        return NULL;
+    }
+
+    return tmp;
 }
 #else
 bool getExecutablePath(const char* callingPath, char* dest) {
+    // TODO: do actual checking of the path sizes!
+    // TODO: use tmpf!
     char workingDirectory[PATH_MAX];
     if (_getcwd(workingDirectory, sizeof(workingDirectory)) == NULL) {
         return false;
@@ -79,6 +115,88 @@ bool getExecutablePath(const char* callingPath, char* dest) {
 }
 #endif
 
+bool cleanAbsolutePath(char* path) {
+    // TODO: replace \ with /
+    // TODO: WINDOWS absolute paths start differently!
+    if (*path != '/') {
+        return false;
+    }
+
+    char* start = path + 1;
+    char* end = start;
+    int totalLength = 0;
+    while (*end) {
+        ++end;
+        ++totalLength;
+    }
+
+    // remove trailing /
+    int index = totalLength - 1;
+    while (start[index] == '/') {
+        start[index] = '\0';
+        --totalLength;
+    }
+
+    if (totalLength == 1 && start[0] == '.') {
+        path[0] = '/';
+        path[1] = '\0';
+        return true;
+    }
+
+    // keep counter
+    // iterate through parts backwards
+    // - if we encounter normal part:
+    //     counter == 0: prepend to output
+    //     counter > 0: ignore it and decrease counter
+    // - if we encounter '..': increase counter
+    // - if we encounter '.': ignore it
+    int collapseCounter = 0;
+    int outputIndex = totalLength - 1;
+    for (int endIndex = totalLength - 1; endIndex >= 0; --endIndex) {
+        int startIndex = endIndex;
+        while (startIndex >= 0 && start[startIndex] != '/') {
+            --startIndex;
+        }
+
+        char* part = start + startIndex + 1;
+        int length = endIndex - startIndex;
+        bool singleDot = (length == 1) && (part[0] == '.');
+        bool doubleDot = (length == 2) && (part[0] == '.') && (part[1] == '.');
+
+        if (doubleDot) {
+            ++collapseCounter;
+        }
+        else if (!singleDot) {
+            if (collapseCounter > 0) {
+                --collapseCounter;
+            }
+            else if (endIndex == outputIndex) {
+                // no need to modify string, everything is in the correct place.
+                outputIndex -= length + 1;
+            }
+            else {
+                for (int i = length - 1; i >= 0; --i) {
+                    start[outputIndex] = part[i];
+                    --outputIndex;
+                    assert(outputIndex >= 0);
+                }
+                start[outputIndex--] = '/';
+            }
+        }
+
+        endIndex = startIndex;
+    }
+
+    if (collapseCounter > 0 || outputIndex == totalLength - 1) {
+        path[0] = '/';
+        path[1] = '\0';
+        return true;
+    }
+
+    memmove(path, start + outputIndex + 1, totalLength - outputIndex + 1);
+    return true;
+}
+
 char* splitAtLastOccurence(char* src, char c) {
     char* p = src;
     char* lastOccurence = NULL;
@@ -96,39 +214,6 @@ char* splitAtLastOccurence(char* src, char c) {
 
     return NULL;
 }
-
-#ifdef LINUX
-bool concatPaths_(char* dest, const char* paths[], int count) {
-    char buffer[PATH_MAX];
-    char* p = buffer;
-    for (int i = 0; i < count; ++i) {
-        const char* path = paths[i];
-        while (*path == ' ') {
-            ++path;
-        }
-
-        // TODO: Check we dont run out of bounds!
-        size_t len = getStringLength(path);
-        if (len == 0) {
-            continue;
-        }
-
-        // TODO: Remove trailing whitespaces?
-
-        if (i > 0) {
-            // Insert / between path entries
-            if (p[-1] != '/' && path[0] != '/') {
-                *p = '/';
-                ++p;
-            }
-        }
-
-        p = stpcpy(p, path);
-    }
-
-    return realpath(buffer, dest) != NULL;
-}
-#endif
 
 static void _hexdump_printChars(FILE* stream, void* memory, size_t count) {
     for (size_t i = 0; i < count; ++i) {
@@ -196,11 +281,15 @@ void hexdump(FILE* stream, void* memory, size_t size, size_t itemSize) {
 
 #define TIMER_CLOCK_ID CLOCK_MONOTONIC_RAW
 bool timerBegin(Timer* t) {
+    // TODO: This dependency on SDL is really not nice!
+    // see https://www.youtube.com/watch?v=nRwGKqU5na0 for a cross platform nanosecond implementation!!!
     t->begin = SDL_GetTicksNS();
     return true;
 }
 
 bool timerEnd(Timer* t) {
+    // TODO: This dependency on SDL is really not nice!
+    // see https://www.youtube.com/watch?v=nRwGKqU5na0 for a cross platform nanosecond implementation!!!
     t->end = SDL_GetTicksNS();
     long diffNano = t->end - t->begin;
     t->elapsedMs = diffNano * 1e-6f;

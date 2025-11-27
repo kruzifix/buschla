@@ -2,8 +2,6 @@
 
 #include <stdint.h>
 
-#include "util.h"
-
 #define DEFINE_DYNAMIC_ARRAY(name, type) typedef struct { \
     type* items; \
     uint32_t count; \
@@ -23,9 +21,13 @@
 #define da_append(arrayPtr, item) da_append_ptr(arrayPtr, &item)
 // Expects a pointer to an item.
 #define da_append_ptr(arrayPtr, itemPtr) _da_append(DA_EXPAND_ARGS(arrayPtr), (void*)(itemPtr))
+#if __cplusplus
 // Adds an item and returns a pointer to it.
-// NOTE: The decltype cast is really stupid, but sadly required because we are compiling as C++
 #define da_append_get(arrayPtr) (decltype((arrayPtr)->items))_da_append_get(DA_EXPAND_ARGS(arrayPtr))
+#else
+// Adds an item and returns a pointer to it.
+#define da_append_get(arrayPtr) _da_append_get(DA_EXPAND_ARGS(arrayPtr))
+#endif
 
 DEFINE_DYNAMIC_ARRAY(_DummyDynamicArray, void)
 
@@ -49,6 +51,11 @@ void* _da_append_get(_DummyDynamicArray* array, uint32_t itemSize);
 #define CHARS_CHUNK_SIZE 4096
 
 typedef struct {
+    const char* txt;
+    uint32_t len;
+} StrView;
+
+typedef struct {
     char* content;
     // "Points" to next free byte (i.e. stores how much space is occupied)
     uint32_t count;
@@ -57,8 +64,20 @@ typedef struct {
 
 DEFINE_DYNAMIC_ARRAY(Chars, CharsChunk)
 
+// Copies given null-terminated string into the chunk array
+// The returned pointer will stay valid, it is never moved
+// DO NOT free this pointer
 char* ca_commit(Chars* chars, const char* str);
+
+// Copies given string view into the chunk array
+// The returned pointer will stay valid, it is never moved
+// DO NOT free this pointer
 char* ca_commit_view(Chars* chars, StrView view);
+
+// Uses vsnprintf to directly format a string into the chunk array
+// The returned pointer will stay valid, it is never moved
+// DO NOT free this pointer
+char* ca_commitf(Chars* chars, const char* fmt, ...);
 
 // Resets the count of each chunk, does not de-allocate.
 void ca_reset(Chars* chars);

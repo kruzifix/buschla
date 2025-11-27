@@ -1,11 +1,10 @@
 #include "dynamic_array.h"
 
-#include "util.h"
-
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdarg.h>
 
 #define DISABLE_DEBUG_PRINTING
 
@@ -79,6 +78,10 @@ char* ca_commit(Chars* chars, const char* str) {
     }
 
     size_t len = strlen(str);
+    if (len == 0) {
+        return NULL;
+    }
+
     StrView view;
     view.txt = str;
     view.len = len;
@@ -86,14 +89,26 @@ char* ca_commit(Chars* chars, const char* str) {
     return ca_commit_view(chars, view);
 }
 
-static char* _ca_commit_to_chunk(CharsChunk* chunk, StrView view) {
-    char* dest = chunk->content + chunk->count;
-    memcpy(dest, view.txt, view.len);
-    dest[view.len] = '\0';
-    chunk->count += view.len + 1;
-    ++chunk->strCount;
-    _printf("%s: appending %u bytes to chunk %p. count is now %u. strCount is %u.\n", __FUNCTION__, view.len + 1, chunk, chunk->count, chunk->strCount);
-    return dest;
+static CharsChunk* _ca_get_chunk(Chars* chars, uint32_t requiredSpace) {
+    _printf("%s: search for chunk with atleast %u free space\n", __FUNCTION__, requiredSpace);
+
+    for (uint32_t i = 0; i < chars->count; ++i) {
+        uint32_t chunkCount = chars->items[i].count;
+        uint32_t freeSpace = CHARS_CHUNK_SIZE - chunkCount;
+        if (freeSpace >= requiredSpace) {
+            _printf("%s: found enough space in chunk with index %u\n", __FUNCTION__, i);
+            return chars->items + i;
+        }
+    }
+
+    _printf("%s: allocating new chunk\n", __FUNCTION__);
+
+    CharsChunk* chunk = da_append_get(chars);
+    chunk->content = (char*)malloc(CHARS_CHUNK_SIZE);
+    chunk->count = 0;
+    chunk->strCount = 0;
+
+    return chunk;
 }
 
 char* ca_commit_view(Chars* chars, StrView view) {
@@ -108,23 +123,55 @@ char* ca_commit_view(Chars* chars, StrView view) {
 
     _printf("%s: trying to commit str with len %u\n", __FUNCTION__, view.len);
 
-    for (uint32_t i = 0; i < chars->count; ++i) {
-        uint32_t chunkCount = chars->items[i].count;
-        uint32_t freeSpace = CHARS_CHUNK_SIZE - chunkCount;
-        if (freeSpace >= requiredSpace) {
-            _printf("%s: found enough space in chunk with index %u\n", __FUNCTION__, i);
-            return _ca_commit_to_chunk(chars->items + i, view);
-        }
+    CharsChunk* chunk = _ca_get_chunk(chars, requiredSpace);
+    assert(chunk != NULL);
+
+    char* dest = chunk->content + chunk->count;
+    memcpy(dest, view.txt, view.len);
+    dest[view.len] = '\0';
+    chunk->count += view.len + 1;
+    ++chunk->strCount;
+
+    _printf("%s: appending %u bytes to chunk %p. count is now %u. strCount is %u.\n", __FUNCTION__, view.len + 1, chunk, chunk->count, chunk->strCount);
+
+    return dest;
+}
+
+char* ca_commitf(Chars* chars, const char* fmt, ...) {
+    if (fmt == NULL) {
+        return NULL;
     }
 
-    _printf("%s: allocating new chunk\n", __FUNCTION__);
-    CharsChunk chunk;
-    chunk.content = (char*)malloc(CHARS_CHUNK_SIZE);
-    chunk.count = 0;
-    chunk.strCount = 0;
-    char* ret = _ca_commit_to_chunk(&chunk, view);
-    da_append(chars, chunk);
-    return ret;
+    va_list args;
+    va_start(args, fmt);
+    int requiredSize = vsnprintf(NULL, 0, fmt, args);
+    va_end(args);
+
+    assert(requiredSize >= 0 && "ca_commitf: first call to vsnprintf returned a negative value");
+
+    uint32_t requiredSpace = (uint32_t)requiredSize + 1;
+    assert(requiredSpace <= CHARS_CHUNK_SIZE);
+
+    _printf("%s: trying to commit formatted str with fmt '%s' required space: %u.\n", __FUNCTION__, fmt, requiredSpace);
+
+    CharsChunk* chunk = _ca_get_chunk(chars, requiredSpace);
+    assert(chunk != NULL);
+
+    char* dest = chunk->content + chunk->count;
+
+    va_start(args, fmt);
+    int writtenSize = vsnprintf(dest, requiredSpace, fmt, args);
+    va_end(args);
+
+    assert(writtenSize >= 0 && "ca_commitf: second call to vsnprintf returned a negative value");
+    assert(writtenSize == requiredSize);
+
+    chunk->count += writtenSize + 1;
+    ++chunk->strCount;
+
+    _printf("%s: appending %u bytes to chunk %p. count is now %u. strCount is %u.\n", __FUNCTION__, writtenSize + 1, chunk, chunk->count, chunk->strCount);
+
+    return dest;
 }
 
 void ca_reset(Chars* chars) {
@@ -152,8 +199,8 @@ void ca_dump(FILE* stream, Chars* chars) {
                     break;
                 }
 
-                //fprintf(stream, "%4d: '%s'\n", index, str);
-                fprintf(stream, "%4d: length: %ld\n", index, strlen(str));
+                fprintf(stream, "%4d: '%s'\n", index, str);
+                //fprintf(stream, "%4d: length: %ld\n", index, strlen(str));
                 ++index;
                 str = p + 1;
                 p = str;

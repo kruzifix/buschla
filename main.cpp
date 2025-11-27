@@ -35,8 +35,6 @@
 #include "app.cpp"
 #endif
 
-// TODO: How can we also build this to statically link the app layer?
-// because we need the code hot reloading really only for dev on linux
 typedef void (app_main_func)(AppState* state);
 
 static SDL_FColor clear_color{ .1f, .1f, .1f, 1.f };
@@ -224,10 +222,16 @@ static void drawHotReloadStatusWindow(AppState* state) {
 }
 #endif
 
+// Returns exit status of cmd.
 static int runCmd(const char* cmd) {
+    if (cmd == NULL) {
+        return -1;
+    }
+
     printf("[BUSCHLA] Running cmd '%s' ...", cmd);
     int code = system(cmd);
     printf(" returned %d\n", code);
+
     return code;
 }
 
@@ -235,25 +239,14 @@ int main(int argc, char** argv) {
     Chars chars;
     memset(&chars, 0, sizeof(Chars));
 
-    char strBuffer[PATH_MAX];
-
     AppState state;
     state.stateMemory = NULL;
     state.stateMemorySize = 0;
-    bool exePathRet = getExecutablePath(argv[0], strBuffer);
-    assert(exePathRet);
-    splitAtLastOccurence(strBuffer, '/');
 
-    // NOTE: All this string manipulation with the paths makes me nervous.
-    // Especially because for hot-reloading we run rm commands.
-    // So lets just plop an assert here to make sure our buffers are never overrun
-    {
-        size_t exePathLen = strlen(strBuffer);
-        // Worst case is us running cp %s %s.
-        assert(exePathLen < (PATH_MAX / 3));
-    }
-
-    state.exePath = ca_commit(&chars, strBuffer);
+    char* tmp = getExecutableFilePath(argv[0]);
+    assert(tmp != NULL);
+    splitAtLastOccurence(tmp, '/');
+    state.exePath = ca_commit(&chars, tmp);
     printf("[BUSCHLA] exePath: '%s'\n", state.exePath);
 
 #ifdef ENABLE_HOT_RELOADING
@@ -265,10 +258,11 @@ int main(int argc, char** argv) {
         "..",
         "../imgui",
     };
-    char watcherPath[PATH_MAX];
+
     for (size_t i = 0; i < ARRAY_SIZE(watchPaths); ++i) {
-        concatPaths(watcherPath, state.exePath, watchPaths[i]);
-        DirWatcherConfig_AppendDirectory(&watcherState.config, watcherPath);
+        tmp = tmpf("%s/%s", state.exePath, watchPaths[i]);
+        cleanAbsolutePath(tmp);
+        DirWatcherConfig_AppendDirectory(&watcherState.config, tmp);
     }
 
     // TODO: configure reaction
@@ -330,26 +324,19 @@ int main(int argc, char** argv) {
     init_info.PresentMode = SDL_GPU_PRESENTMODE_VSYNC;
     ImGui_ImplSDLGPU3_Init(&init_info);
 
-    // TODO: remove concatPaths and make a nice wrapper for snprintf and static buffer!
-    //concatPaths(strBuffer, state.exePath, "/font.ttf");
-    snprintf(strBuffer, sizeof(strBuffer), "%s/font.ttf", state.exePath);
-    ImFont* font = io.Fonts->AddFontFromFileTTF(strBuffer);
+    tmp = tmpf("%s/font.ttf", state.exePath);
+    ImFont* font = io.Fonts->AddFontFromFileTTF(tmp);
     IM_ASSERT(font != NULL);
 
 #ifdef ENABLE_HOT_RELOADING
 
-    concatPaths(strBuffer, state.exePath, "/tmp");
-    const char* tmpPath = ca_commit(&chars, strBuffer);
+    const char* tmpPath = ca_commitf(&chars, "%s/tmp", state.exePath);
     printf("[BUSCHLA] tmpPath: '%s'\n", tmpPath);
 
-    // TODO: This is kinda dangerous. if the path is cut off, it could be that we remove something unrelated!
-    snprintf(strBuffer, sizeof(strBuffer), "rm -rf %s", tmpPath);
-    runCmd(strBuffer);
-    snprintf(strBuffer, sizeof(strBuffer), "mkdir %s", tmpPath);
-    runCmd(strBuffer);
+    runCmd(tmpf("rm -rf %s", tmpPath));
+    runCmd(tmpf("mkdir %s", tmpPath));
 
-    concatPaths(strBuffer, state.exePath, "app.so");
-    const char* appLibraryPath = ca_commit(&chars, strBuffer);
+    const char* appLibraryPath = ca_commitf(&chars, "%s/app.so", state.exePath);
     printf("[BUSCHLA] appLibraryPath: '%s'\n", appLibraryPath);
 
     typedef struct {
@@ -360,11 +347,8 @@ int main(int argc, char** argv) {
 
     HotReloadData hotReloadData[2];
     for (int i = 0; i < 2; ++i) {
-        snprintf(strBuffer, sizeof(strBuffer), "%s/tmp%d", tmpPath, i);
-        hotReloadData[i].tmpPath = ca_commit(&chars, strBuffer);
-
-        snprintf(strBuffer, sizeof(strBuffer), "cp %s %s", appLibraryPath, hotReloadData[i].tmpPath);
-        hotReloadData[i].cmdCopyToTmp = ca_commit(&chars, strBuffer);
+        hotReloadData[i].tmpPath = ca_commitf(&chars, "%s/tmp%d", tmpPath, i);
+        hotReloadData[i].cmdCopyToTmp = ca_commitf(&chars, "cp %s %s", appLibraryPath, hotReloadData[i].tmpPath);
     }
 
     int currentTmpLibraryIndex = 0;
@@ -517,9 +501,7 @@ int main(int argc, char** argv) {
 
     DirWatcher_Shutdown(&watcherState);
 
-    // TODO: DANGEROUS!
-    snprintf(strBuffer, sizeof(strBuffer), "rm -rf %s", tmpPath);
-    runCmd(strBuffer);
+    runCmd(tmpf("rm -rf %s", tmpPath));
 #endif
 
     SDL_WaitForGPUIdle(gpu_device);

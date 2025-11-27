@@ -207,6 +207,8 @@ static void gui(AppState* appState, State* state) {
 // If EOF or an error occured while reading, NULL is returned instead.
 // TODO: For now we cut off any line longer than 4K characters.
 // Is that an ok assumption to make?  ¯\_(ツ)_/¯
+// TODO: This could also use a buffer allocated inside the function
+// which grows on demand
 static char fetchLineBuffer[4 * 1024];
 static char* fetchLine(FILE* stream, uint32_t* lengthOut) {
     if (stream == NULL) {
