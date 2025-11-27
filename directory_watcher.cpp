@@ -4,13 +4,14 @@
 //#define _GNU_SOURCE
 #include <assert.h>
 #include <errno.h>
-#include <limits.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/inotify.h>
+#include <sys/prctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -37,6 +38,9 @@ static bool _shouldTriggerBuild(const char* fileName, const char* extension) {
 // It gets passed the DirWatcherState (which is copied when forking).
 // Also the allocated buffer inside DirWatcherState is automatically copied when forking.
 static int _DirWatcher_ChildProc(void* arg) {
+    // This ensures the child proc is also terminated if the parent crashes or exits.
+    prctl(PR_SET_PDEATHSIG, SIGTERM);
+
     int notifyFd = inotify_init1(IN_NONBLOCK);
     if (notifyFd == -1) {
         perror("_DirWatcher_ChildProc  inotify_init1");
