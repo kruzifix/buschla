@@ -40,22 +40,44 @@ typedef void (app_main_func)(AppState* state);
 
 static SDL_FColor clear_color{ .1f, .1f, .1f, 1.f };
 
+// Returns exit status of cmd.
+static int runCmd(const char* cmd) {
+    if (cmd == NULL) {
+        return -1;
+    }
+
+    printf("[BUSCHLA] Running cmd '%s' ...", cmd);
+    int code = system(cmd);
+    printf(" returned %d\n", code);
+
+    return code;
+}
+
 #ifdef ENABLE_HOT_RELOADING
 typedef struct {
     void* handle;
     app_main_func* app_main;
 } AppLibraryState;
 
-// Returns false on error, check dlerror() for reason.
+// Returns false on error.
 static bool tryLoadAppLibrary(const char* path, AppLibraryState* state) {
-    void* handle = dlopen(path, RTLD_NOW);
+    state->handle = NULL;
+    state->app_main = NULL;
+
+    void* handle = dlopen(path, RTLD_LAZY | RTLD_LOCAL);
     if (handle == NULL) {
+        printf("%s| dlopen() returned NULL: %s\n", __FUNCTION__, dlerror());
         return false;
     }
 
     app_main_func* app_main = (app_main_func*)dlsym(handle, "app_main");
     if (app_main == NULL) {
-        dlclose(handle);
+        printf("%s| dlsym(\"app_main\") returned NULL: %s\n", __FUNCTION__, dlerror());
+
+        int ret = dlclose(handle);
+        if (ret != 0) {
+            printf("%s| dlclose() returned %d: %s\n", __FUNCTION__, ret, dlerror());
+        }
         return false;
     }
 
@@ -66,7 +88,10 @@ static bool tryLoadAppLibrary(const char* path, AppLibraryState* state) {
 
 static void unloadAppLibrary(AppLibraryState* state) {
     if (state->handle != NULL) {
-        dlclose(state->handle);
+        int ret = dlclose(state->handle);
+        if (ret != 0) {
+            printf("%s| dlclose() returned %d: %s\n", __FUNCTION__, ret, dlerror());
+        }
 
         state->handle = NULL;
         state->app_main = NULL;
@@ -103,7 +128,11 @@ static void triggerHotReloadStatus(bool success, const char* msg) {
     if (hotReloadStatusWindow.msg != NULL) {
         free(hotReloadStatusWindow.msg);
     }
-    hotReloadStatusWindow.msg = strdup(msg);
+
+    hotReloadStatusWindow.msg = NULL;
+    if (msg != NULL) {
+        hotReloadStatusWindow.msg = strdup(msg);
+    }
 }
 
 static void drawHotReloadStatusWindow(AppState* state) {
@@ -171,70 +200,115 @@ static void drawHotReloadStatusWindow(AppState* state) {
     ImGui::SeparatorText(hotReloadStatusWindow.success ? "HOT-Reload Succeeded!" : "HOT-RELOAD Failed!");
 
     const char* lineStart = hotReloadStatusWindow.msg;
-    const char* p = lineStart;
-    // TODO: omg, doing this each frames ... I feel my ancestors turning around in their graves ...
-    while (*p != '\0') {
-        bool startsWithMake = strncmp(p, "make[", 5) == 0;
-        bool startsWithCompiler = strncmp(p, "g++ ", 4) == 0;
+    if (lineStart != NULL) {
+        const char* p = lineStart;
+        // TODO: omg, doing this each frames ... I feel my ancestors turning around in their graves ...
+        while (*p != '\0') {
+            bool startsWithMake = strncmp(p, "make[", 5) == 0;
+            bool startsWithCompiler = strncmp(p, "g++ ", 4) == 0;
 
-        if (strncmp(p, "./build/../", 11) == 0) {
-            lineStart += 11;
-            p += 11;
-        }
+            if (strncmp(p, "./build/../", 11) == 0) {
+                lineStart += 11;
+                p += 11;
+            }
 
-        bool isError = false;
-        bool isWarning = false;
-        bool isNote = false;
-        while (*p != '\n' && *p != '\0') {
-            if (strncmp(p, "error:", 6) == 0) {
-                isError = true;
+            bool isError = false;
+            bool isWarning = false;
+            bool isNote = false;
+            while (*p != '\n' && *p != '\0') {
+                if (strncmp(p, "error:", 6) == 0) {
+                    isError = true;
+                }
+                if (strncmp(p, "warning:", 8) == 0) {
+                    isWarning = true;
+                }
+                if (strncmp(p, "note:", 5) == 0) {
+                    isNote = true;
+                }
+                ++p;
             }
-            if (strncmp(p, "warning:", 8) == 0) {
-                isWarning = true;
+            if (!startsWithMake && !startsWithCompiler) {
+                int lineLength = (int)(p - lineStart);
+                if (isWarning || isError || isNote) {
+                    // TODO: kind hacky, but works :shrug:
+                    hotReloadStatusWindow.autoClose = false;
+                    float h = isError ? 4.f : (isWarning ? 55.f : 88.f);
+                    ImVec4 col = (ImVec4)ImColor::HSV(h / 360.f, .83f, .83f);
+                    ImGui::TextColored(col, "%*.*s", lineLength, lineLength, lineStart);
+                }
+                else {
+                    ImGui::Text("%*.*s", lineLength, lineLength, lineStart);
+                }
             }
-            if (strncmp(p, "note:", 5) == 0) {
-                isNote = true;
+            if (*p == '\0') {
+                break;
             }
-            ++p;
+            lineStart = p + 1;
+            p = lineStart;
         }
-        if (!startsWithMake && !startsWithCompiler) {
-            int lineLength = (int)(p - lineStart);
-            if (isWarning || isError || isNote) {
-                // TODO: kind hacky, but works :shrug:
-                hotReloadStatusWindow.autoClose = false;
-                float h = isError ? 4.f : (isWarning ? 55.f : 88.f);
-                ImVec4 col = (ImVec4)ImColor::HSV(h / 360.f, .83f, .83f);
-                ImGui::TextColored(col, "%*.*s", lineLength, lineLength, lineStart);
-            }
-            else {
-                ImGui::Text("%*.*s", lineLength, lineLength, lineStart);
-            }
-        }
-        if (*p == '\0') {
-            break;
-        }
-        lineStart = p + 1;
-        p = lineStart;
     }
 
     ImGui::End();
     ImGui::PopStyleVar(3);
     ImGui::PopStyleColor();
 }
-#endif
 
-// Returns exit status of cmd.
-static int runCmd(const char* cmd) {
-    if (cmd == NULL) {
-        return -1;
+char* appLibraryPath = NULL;
+char* tmpDirPath = NULL;
+#define TMP_FILE_FMT "%s/tmp%d"
+int currentTmpLibraryIndex = 0;
+AppLibraryState appLibrary;
+
+// NOTE: Uses tmpf internally!
+static void tryReloadAppLibrary(DirWatcherEvent* watcherEvent) {
+    if (watcherEvent->reactionReport.exitStatus != 0) {
+        printf("%s[BUSCHLA] Unable to reload app library!%s\n", TERM_COL_RED_BOLD, TERM_COL_CLEAR);
+        triggerHotReloadStatus(false, watcherEvent->reactionReport.statusMsg);
+        return;
     }
 
-    printf("[BUSCHLA] Running cmd '%s' ...", cmd);
-    int code = system(cmd);
-    printf(" returned %d\n", code);
+    int nextTmpLibraryIndex = currentTmpLibraryIndex + 1;
 
-    return code;
+    // NOTE: Always copy to a new file (that was not previously used, i.e. had dlopen followed by dlclose called on it)
+    // We previously flip-flop-ed between two files that we copied over,
+    // but this resulted in segfaults in dlsym, probably because the symbol table was corrupted.
+    // for a similar issue see here:
+    // https://bugzilla.redhat.com/show_bug.cgi?id=1327623
+    char* tmpPath = strdup(tmpf(TMP_FILE_FMT, tmpDirPath, nextTmpLibraryIndex));
+    char* cmdCopyToTmp = tmpf("cp %s %s", appLibraryPath, tmpPath);
+    if (runCmd(cmdCopyToTmp) != 0) {
+        char* msg = tmpf("[BUSCHLA] '%s' failed!", cmdCopyToTmp);
+        printf("%s%s%s\n", TERM_COL_RED_BOLD, msg, TERM_COL_CLEAR);
+        triggerHotReloadStatus(false, msg);
+
+        free(tmpPath);
+        return;
+    }
+
+    AppLibraryState newAppLibrary;
+    if (!tryLoadAppLibrary(tmpPath, &newAppLibrary)) {
+        char* msg = tmpf("[BUSCHLA] failed to load '%s'!", tmpPath);
+        printf("%s%s%s\n", TERM_COL_RED_BOLD, msg, TERM_COL_CLEAR);
+        triggerHotReloadStatus(false, msg);
+
+        free(tmpPath);
+        return;
+    }
+
+    unloadAppLibrary(&appLibrary);
+    runCmd(tmpf("rm "TMP_FILE_FMT, tmpDirPath, currentTmpLibraryIndex));
+
+    appLibrary.handle = newAppLibrary.handle;
+    appLibrary.app_main = newAppLibrary.app_main;
+    currentTmpLibraryIndex = nextTmpLibraryIndex;
+
+    printf("%s[BUSCHLA] Successfully replaced app library!%s\n", TERM_COL_GREEN_BOLD, TERM_COL_CLEAR);
+    triggerHotReloadStatus(true, watcherEvent->reactionReport.statusMsg);
+
+    free(tmpPath);
 }
+
+#endif
 
 int main(int argc, char** argv) {
     Chars chars;
@@ -333,33 +407,20 @@ int main(int argc, char** argv) {
 
 #ifdef ENABLE_HOT_RELOADING
 
-    const char* tmpPath = ca_commitf(&chars, "%s/tmp", state.exePath);
-    printf("[BUSCHLA] tmpPath: '%s'\n", tmpPath);
-
-    runCmd(tmpf("rm -rf %s", tmpPath));
-    runCmd(tmpf("mkdir %s", tmpPath));
-
-    const char* appLibraryPath = ca_commitf(&chars, "%s/app.so", state.exePath);
+    appLibraryPath = ca_commitf(&chars, "%s/app.so", state.exePath);
     printf("[BUSCHLA] appLibraryPath: '%s'\n", appLibraryPath);
 
-    typedef struct {
-        const char* tmpPath;
-        const char* cmdCopyToTmp;
-        const char* cmdRemoveTmp;
-    } HotReloadData;
+    tmpDirPath = ca_commitf(&chars, "%s/tmp", state.exePath);
+    printf("[BUSCHLA] tmpDirPath: '%s'\n", tmpDirPath);
 
-    HotReloadData hotReloadData[2];
-    for (int i = 0; i < 2; ++i) {
-        hotReloadData[i].tmpPath = ca_commitf(&chars, "%s/tmp%d", tmpPath, i);
-        hotReloadData[i].cmdCopyToTmp = ca_commitf(&chars, "cp %s %s", appLibraryPath, hotReloadData[i].tmpPath);
-    }
+    runCmd(tmpf("rm -rf %s", tmpDirPath));
+    runCmd(tmpf("mkdir %s", tmpDirPath));
 
-    int currentTmpLibraryIndex = 0;
-    runCmd(hotReloadData[currentTmpLibraryIndex].cmdCopyToTmp);
+    currentTmpLibraryIndex = 0;
+    runCmd(tmpf("cp %s "TMP_FILE_FMT, appLibraryPath, tmpDirPath, currentTmpLibraryIndex));
 
-    AppLibraryState appLibrary;
-    if (!tryLoadAppLibrary(hotReloadData[currentTmpLibraryIndex].tmpPath, &appLibrary)) {
-        fprintf(stderr, "%s\n", dlerror());
+    tmp = tmpf(TMP_FILE_FMT, tmpDirPath, currentTmpLibraryIndex);
+    if (!tryLoadAppLibrary(tmp, &appLibrary)) {
         exit(1);
     }
 #endif
@@ -403,38 +464,7 @@ int main(int argc, char** argv) {
                     watcherEvent.reactionReport.exitStatus,
                     watcherEvent.reactionReport.statusMsg);
 
-                if (watcherEvent.reactionReport.exitStatus == 0) {
-                    int nextTmpLibraryIndex = (currentTmpLibraryIndex + 1) % 2;
-
-                    int copyCmdStatus = runCmd(hotReloadData[nextTmpLibraryIndex].cmdCopyToTmp);
-                    if (copyCmdStatus == 0) {
-                        AppLibraryState newAppLibrary;
-                        if (tryLoadAppLibrary(hotReloadData[nextTmpLibraryIndex].tmpPath, &newAppLibrary)) {
-                            unloadAppLibrary(&appLibrary);
-
-                            appLibrary.handle = newAppLibrary.handle;
-                            appLibrary.app_main = newAppLibrary.app_main;
-                            currentTmpLibraryIndex = nextTmpLibraryIndex;
-
-                            printf("%s[BUSCHLA] Successfully replaced app library!%s\n", TERM_COL_GREEN_BOLD, TERM_COL_CLEAR);
-                            triggerHotReloadStatus(true, watcherEvent.reactionReport.statusMsg);
-                        }
-                        else {
-                            char* errorString = dlerror();
-                            printf("%s[BUSCHLA] Error loading app library: %s%s\n", TERM_COL_RED_BOLD, errorString, TERM_COL_CLEAR);
-                            triggerHotReloadStatus(false, errorString);
-                        }
-                    }
-                    else {
-                        const char* msg = "Unable to copy app.so to a tmp location!";
-                        printf("%s[BUSCHLA] %s%s\n", TERM_COL_RED_BOLD, msg, TERM_COL_CLEAR);
-                        triggerHotReloadStatus(false, msg);
-                    }
-                }
-                else {
-                    printf("%s[BUSCHLA] Unable to reload app library!%s\n", TERM_COL_RED_BOLD, TERM_COL_CLEAR);
-                    triggerHotReloadStatus(false, watcherEvent.reactionReport.statusMsg);
-                }
+                tryReloadAppLibrary(&watcherEvent);
             }
         }
 #endif
@@ -504,7 +534,7 @@ int main(int argc, char** argv) {
 
     DirWatcher_Shutdown(&watcherState);
 
-    runCmd(tmpf("rm -rf %s", tmpPath));
+    runCmd(tmpf("rm -rf %s", tmpDirPath));
 #endif
 
     SDL_WaitForGPUIdle(gpu_device);
