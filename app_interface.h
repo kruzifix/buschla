@@ -1,6 +1,7 @@
 #pragma once
 
 #include "imgui/imgui.h"
+#include "imgui/implot.h"
 
 #include <limits.h>
 
@@ -8,7 +9,9 @@ struct AppState
 {
     const char* exePath;
 
-    ImGuiContext* context;
+    ImGuiContext* imguiContext;
+    ImPlotContext* implotContext;
+
     float time;
     float dt;
 

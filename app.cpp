@@ -8,6 +8,7 @@
 #include "dynamic_array.h"
 
 #include "imgui/imgui_internal.h"
+#include "imgui/implot.h"
 
 #define SPLITTER_SIZE 10.f
 #define SPLIT_MIN_CONTENT_SIZE 100.f
@@ -372,7 +373,8 @@ extern "C" void app_main(AppState* appState) {
     TIME_SCOPE(guiTimer) {
         state = getStateMemory(appState);
 
-        ImGui::SetCurrentContext(appState->context);
+        ImGui::SetCurrentContext(appState->imguiContext);
+        ImPlot::SetCurrentContext(appState->implotContext);
 
         gui(appState, state);
     }
@@ -380,4 +382,5 @@ extern "C" void app_main(AppState* appState) {
     loadLogFile(state);
 
     // ImGui::ShowStyleEditor();
+    // ImPlot::ShowDemoWindow();
 }

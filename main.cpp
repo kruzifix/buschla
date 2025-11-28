@@ -30,6 +30,7 @@
 #include "imgui/imgui_internal.h"
 #include "imgui/imgui_impl_sdl3.h"
 #include "imgui/imgui_impl_sdlgpu3.h"
+#include "imgui/implot.h"
 
 #ifndef ENABLE_HOT_RELOADING
 #include "app.cpp"
@@ -300,7 +301,9 @@ int main(int argc, char** argv) {
     SDL_SetGPUSwapchainParameters(gpu_device, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, SDL_GPU_PRESENTMODE_VSYNC);
 
     IMGUI_CHECKVERSION();
-    state.context = ImGui::CreateContext();
+    state.imguiContext = ImGui::CreateContext();
+    state.implotContext = ImPlot::CreateContext();
+
     ImGuiIO& io = ImGui::GetIO();
     // io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     //  io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
@@ -507,6 +510,8 @@ int main(int argc, char** argv) {
     SDL_WaitForGPUIdle(gpu_device);
     ImGui_ImplSDL3_Shutdown();
     ImGui_ImplSDLGPU3_Shutdown();
+
+    ImPlot::DestroyContext();
     ImGui::DestroyContext();
 
     SDL_ReleaseWindowFromGPUDevice(gpu_device, window);
