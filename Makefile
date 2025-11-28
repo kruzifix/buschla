@@ -61,7 +61,7 @@ $(IMGUI_OBJ): $(IMGUI_SRC_UNITY)
 	$(COMPILE) -fPIC -o $(IMGUI_OBJ) $(IMGUI_SRC_UNITY)
 
 # compose imgui unity source file
-$(IMGUI_SRC_UNITY): $(IMGUI_SRC_FILES) $(BUILD_DIR)
+$(IMGUI_SRC_UNITY): $(IMGUI_SRC_FILES) | $(BUILD_DIR)
 	@echo -e $(IMGUI_SRC_FILES:%='\n#include "../%"') > $(IMGUI_SRC_UNITY)
 
 ## ----------------------------- ##
@@ -85,7 +85,7 @@ $(EXE_OBJ): $(EXE_SRC_UNITY)
 	$(COMPILE) -o $(EXE_OBJ) $(EXE_SRC_UNITY)
 
 # compose exe unity source file
-$(EXE_SRC_UNITY): $(EXE_SRC_FILES) $(BUILD_DIR)
+$(EXE_SRC_UNITY): $(EXE_SRC_FILES) | $(BUILD_DIR)
 	@echo -e $(EXE_SRC_INCLUDES) > $(EXE_SRC_UNITY)
 
 ## ----------------------------- ##
@@ -108,13 +108,13 @@ $(APP_OBJ): $(APP_SRC_UNITY)
 	$(COMPILE) -shared -fPIC -o $(APP_OBJ) $(APP_SRC_UNITY)
 
 # compose app unity source file
-$(APP_SRC_UNITY): $(APP_SRC_FILES) $(BUILD_DIR)
+$(APP_SRC_UNITY): $(APP_SRC_FILES) | $(BUILD_DIR)
 	@echo -e $(APP_SRC_INCLUDES) > $(APP_SRC_UNITY)
 
 ## ----------------------------- ##
 
 $(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
+	mkdir -p $@
 
 .PHONY: run
 run: all
