@@ -2,6 +2,15 @@
 # SDL3-devel package needs to be installed
 # For Windows build see build_win64.bat
 
+# Disable implicit rules so canonical targets will work.
+.SUFFIXES:
+# Disable VCS-based implicit rules.
+% : %,v
+% : RCS/%
+% : RCS/%,v
+% : SCCS/s.%
+% : s.%
+
 # TODO: Refactor this horrible mess with nob.h!!!!
 
 COMPILER = g++
