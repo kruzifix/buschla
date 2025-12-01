@@ -7,18 +7,13 @@
 #include "util.h"
 #include "dynamic_array.h"
 
+#include "buschla_file.h"
+
 #include "imgui/imgui_internal.h"
 #include "imgui/implot.h"
 
 #define SPLITTER_SIZE 10.f
 #define SPLIT_MIN_CONTENT_SIZE 100.f
-
-typedef struct {
-    uint32_t lineNum;
-    StrView str;
-} LogLine;
-
-DEFINE_DYNAMIC_ARRAY(LogLines, LogLine)
 
 // NOTE: The memory for the state is automatically allocated.
 // To ensure compatibility between States when hot-reloading,
@@ -32,11 +27,7 @@ typedef struct {
     float ySplitLeft;
     float ySplitRight;
 
-    const char* pendingFile;
-    FILE* file;
-
-    Chars textBuffer;
-    LogLines logLines;
+    BuschlaFile* buschlaFile;
 
 } State;
 
@@ -155,26 +146,60 @@ static void gui(AppState* appState, State* state) {
         ImGui::BeginChild("region_left_top", ImVec2(widthLeft, state->ySplitLeft),
             0, ImGuiWindowFlags_HorizontalScrollbar);
         {
-            for (uint32_t i = 0; i < state->logLines.count; ++i) {
-                ImGui::PushID(i);
+            if (state->buschlaFile != NULL) {
+                uint32_t logLineCount = state->buschlaFile->header->logLineCount;
+                for (uint32_t i = 0; i < logLineCount; ++i) {
+                    ImGui::PushID(i);
 
-                LogLine* logLine = state->logLines.items + i;
-                // TODO: determine width of line num with line count!
-                ImGui::Text("%6d", logLine->lineNum);
-                ImGui::SameLine(0.f, 4.f);
-                const char* txt = logLine->str.txt;
-                ImGui::TextEx(txt, txt + logLine->str.len);
+                    LogLine* logLine = state->buschlaFile->logLines + i;
+                    // TODO: determine width of line num with line count!
+                    ImGui::Text("%6d", logLine->lineNum);
+                    ImGui::SameLine(0.f, 4.f);
+                    const char* txt = logLine->str.txt;
+                    ImGui::TextEx(txt, txt + logLine->str.len);
 
-                ImGui::PopID();
+                    ImGui::PopID();
+                }
             }
         }
         ImGui::EndChild();
 
         splitter("##region_left_splitter_v", &state->ySplitLeft, false);
 
-        ImGui::BeginChild("region_left_bot", ImVec2(state->xSplit, 0));
+        ImGui::BeginChild("region_left_bot", ImVec2(widthLeft, 0));
         {
-            ImGui::Text("Bot Left");
+            static float xs1[1001], ys1[1001];
+            for (int i = 0; i < 1001; ++i) {
+                xs1[i] = i * 0.001f;
+                ys1[i] = 0.5f + 0.5f * sinf(50 * (xs1[i] + (float)ImGui::GetTime() / 10));
+            }
+            static double xs2[20], ys2[20];
+            for (int i = 0; i < 20; ++i) {
+                xs2[i] = i * 1 / 19.0f;
+                ys2[i] = xs2[i] * xs2[i];
+            }
+
+            ImPlotFlags flags =
+                ImPlotFlags_NoTitle |
+                //ImPlotFlags_NoLegend |
+                ImPlotFlags_NoMouseText |
+                ImPlotFlags_NoInputs |
+                ImPlotFlags_NoMenus |
+                ImPlotFlags_NoBoxSelect |
+                ImPlotFlags_NoFrame |
+                //ImPlotFlags_Equal |
+                ImPlotFlags_Crosshairs;
+
+            // TODO: If we have other widgets, this doesnt work!
+            ImVec2 regionSize = ImGui::GetWindowSize();
+            if (ImPlot::BeginPlot("Test Plot", ImVec2(regionSize.x, regionSize.y), flags)) {
+                ImPlot::SetupAxes("x", "y");
+                ImPlot::PlotLine("f(x)", xs1, ys1, 1001);
+                ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle);
+                // TODO: Checkout what Stride / Striding can do for us!!!
+                ImPlot::PlotLine("g(x)", xs2, ys2, 20, ImPlotLineFlags_Segments);
+                ImPlot::EndPlot();
+            }
         }
         ImGui::EndChild();
 
@@ -193,14 +218,7 @@ static void gui(AppState* appState, State* state) {
             SCOPE_STYLE2(ImGuiStyleVar_ItemSpacing, 5.f, 5.f);
 
             ImGui::Text("Top Right");
-            if (ImGui::Button("log.txt")) {
-                snprintf(filePath, sizeof(filePath), "%s/../log.txt", appState->exePath);
-                state->pendingFile = filePath;
-            }
-            if (ImGui::Button("log_big.txt")) {
-                snprintf(filePath, sizeof(filePath), "%s/../log_big.txt", appState->exePath);
-                state->pendingFile = filePath;
-            }
+
         }
         ImGui::EndChild();
 
@@ -215,130 +233,6 @@ static void gui(AppState* appState, State* state) {
         ImGui::EndChild();
     }
     ImGui::End();
-}
-
-// Returns pointer to statically allocated buffer. Don't store this pointer!
-// The contents will be modified the next time fetchLine is called.
-// If EOF or an error occured while reading, NULL is returned instead.
-// TODO: For now we cut off any line longer than 4K characters.
-// Is that an ok assumption to make?  ¯\_(ツ)_/¯
-// TODO: This could also use a buffer allocated inside the function which grows on demand
-static char fetchLineBuffer[4 * 1024];
-static char* fetchLine(FILE* stream, uint32_t* lengthOut) {
-    if (stream == NULL) {
-        *lengthOut = 0;
-        return NULL;
-    }
-
-    uint32_t length = 0;
-    while (length < sizeof(fetchLineBuffer)) {
-        char c;
-        size_t count = fread(&c, 1, 1, stream);
-        if (count != 1) {
-            if (length == 0) {
-                *lengthOut = 0;
-                return NULL;
-            }
-
-            break;
-        }
-
-        if (c == '\n') {
-            break;
-        }
-
-        // Ignore other non-printable characters
-        // 0x7F is DEL
-        if (ASCII_IS_CONTROL(c) || UTF8_IS_CONTINUATION(c)) {
-            continue;
-        }
-
-        bool isAscii = c >= 0 && c < 0x80;
-        bool isCodePointStart = UTF8_IS_START(c);
-
-        bool addToBuffer = isAscii;
-        if (isCodePointStart) {
-            c = '?';
-            addToBuffer = true;
-        }
-
-        if (addToBuffer) {
-            fetchLineBuffer[length] = c;
-            ++length;
-        }
-    }
-
-    *lengthOut = length;
-    return fetchLineBuffer;
-}
-
-static void loadLogFile(State* state) {
-    // LOG FILE LOADING
-    // NOTE: for text pasted from clipboard: paste to file and then use the same interface for loading log from file!
-    // TODO: what if the file is modified?
-    // => either file was overwritten
-    // => or stuff was appended
-    // we have to detect which happened, and then act accordingly!
-
-    if (state->file == NULL && state->pendingFile != NULL) {
-        state->file = fopen(state->pendingFile, "r");
-        if (state->file == NULL) {
-            perror("fopen state->file");
-            return;
-        }
-
-        printf("[APP] started fetching file '%s'\n", state->pendingFile);
-        state->pendingFile = NULL;
-
-        state->logLines.count = 0;
-        ca_reset(&state->textBuffer);
-    }
-
-    if (state->file != NULL) {
-        uint32_t length = 0;
-        char* line = NULL;
-        float elapsedTime = 0.f;
-
-        int lineNum = 1;
-        if (state->logLines.count > 0) {
-            lineNum = state->logLines.items[state->logLines.count - 1].lineNum + 1;
-        }
-        int lines = 0;
-        while (elapsedTime < 5.f) {
-            TIME_SCOPE(fetchLineTimer) {
-                line = fetchLine(state->file, &length);
-
-                if (length > 0) {
-                    LogLine* logLine = da_append_get(&state->logLines);
-                    logLine->lineNum = lineNum;
-                    logLine->str.txt = ca_commit(&state->textBuffer, line);
-                    logLine->str.len = length;
-                }
-
-                ++lineNum;
-                ++lines;
-            }
-
-            elapsedTime += fetchLineTimer.elapsedMs;
-            if (line == NULL) {
-                break;
-            }
-        }
-
-        printf("[APP] fetched %d lines in %.3fms\n", lines, elapsedTime);
-
-        if (line == NULL) {
-            int ret = fclose(state->file);
-            if (ret != 0) {
-                perror("fclose state->file");
-            }
-
-            state->file = NULL;
-            printf("[APP] finished fetching file\n");
-
-            //ca_dump(stdout, &state->textBuffer);
-        }
-    }
 }
 
 static State* getStateMemory(AppState* state) {
@@ -379,7 +273,12 @@ extern "C" void app_main(AppState* appState) {
         gui(appState, state);
     }
 
-    loadLogFile(state);
+    if (state->buschlaFile == NULL) {
+        TIME_SCOPE(loadBuschlaFileTimer) {
+            state->buschlaFile = tryLoadBuschlaFile("out.buschla");
+        }
+        printf("Load buschlaFile took %.3fms\n", loadBuschlaFileTimer.elapsedMs);
+    }
 
     // ImGui::ShowStyleEditor();
     // ImPlot::ShowDemoWindow();
