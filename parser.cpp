@@ -5,13 +5,6 @@
 
 #include "buschla_file.h"
 
-// NOTES: The plan is to have a format
-// where we can directly load a binary file from disk,
-// and just put it into memory and be able to read from it.
-
-// NOTE: We probably need to store all the StrView pointers with relative adresses
-// and resolve them after loading.
-
 // We want to store:
 // - All of the text of the log lines
 // - Info per LogLine
@@ -95,6 +88,204 @@ static char* fetchLine(FILE* stream, uint32_t* lengthOut) {
     return buffer;
 }
 
+#define TOKEN_KINDS(X) \
+    X(TOK_EOF) \
+    X(TOK_SINGLE_SPECIAL) \
+    X(TOK_INTEGER) \
+    X(TOK_HEX) \
+    X(TOK_BINARY) \
+    X(TOK_FLOAT) \
+    X(TOK_WORD) \
+    X(TOK_PATH)
+// TODO: DateTime
+
+typedef enum {
+#define X(x) x,
+    TOKEN_KINDS(X)
+#undef X
+} TokenKind;
+
+const char* tokenKindStrs[] = {
+#define X(x) #x,
+    TOKEN_KINDS(X)
+#undef X
+};
+
+typedef struct {
+    StrView str;
+    const char* pos;
+
+    TokenKind tokenKind;
+    StrView tokenStr;
+} Lexer;
+
+static bool isWhiteSpace(char c) {
+    return c == ' ' || c == '\t';
+}
+
+static bool isDigit(char c) {
+    return c >= '0' && c <= '9';
+}
+
+static bool isHexDigit(char c) {
+    return (c >= '0' && c <= '9') ||
+        (c >= 'a' && c <= 'f') ||
+        (c >= 'A' && c <= 'F');
+}
+
+static bool isLetter(char c) {
+    return (c >= 'a' && c <= 'z') ||
+        (c >= 'A' && c <= 'Z');
+}
+
+static bool isPath(char c) {
+    return (c >= 'a' && c <= 'z') ||
+        (c >= 'A' && c <= 'Z') ||
+        c == ':' || c == '.' || c == '/' || c == '\\';
+}
+
+static bool nextToken(Lexer* lex) {
+#define RETURN_TOKEN(kind) { \
+    lex->tokenKind = (kind); \
+    lex->pos = p; \
+    lex->tokenStr.txt = tokenStart; \
+    lex->tokenStr.len = p - tokenStart; \
+    return true; \
+}
+
+    const char* p = lex->pos;
+    while (isWhiteSpace(*p)) {
+        ++p;
+    }
+
+    const char* tokenStart = p;
+    switch (*p) {
+    case '\0':
+        return false;
+    case '0': {
+        if (p[1] == 'x' && isHexDigit(p[2])) {
+            p += 2;
+            while (isHexDigit(*p)) {
+                ++p;
+            }
+
+            RETURN_TOKEN(TOK_HEX)
+        }
+
+        if (p[1] == 'b') {
+            p += 2;
+            while (*p == '0' || *p == '1') {
+                ++p;
+            }
+            RETURN_TOKEN(TOK_BINARY)
+        }
+    } // Fall through on purpose!
+    case '1': case '2': case '3':
+    case '4': case '5': case '6':
+    case '7': case '8': case '9': {
+    lex_integer:
+        while (isDigit(*p)) {
+            ++p;
+        }
+
+        if (*p == 'e' || *p == 'E') {
+            goto lex_float_exponent;
+        }
+
+        if (*p == '.') {
+            ++p;
+            while (isDigit(*p)) {
+                ++p;
+            }
+
+            if (*p == 'e' || *p == 'E') {
+            lex_float_exponent:
+                ++p;
+                if (*p == '+' || *p == '-') {
+                    ++p;
+                }
+                while (isDigit(*p)) {
+                    ++p;
+                }
+            }
+
+            RETURN_TOKEN(TOK_FLOAT)
+        }
+
+        RETURN_TOKEN(TOK_INTEGER)
+    } break;
+    case '-':
+        if (p[1] == '.' && isDigit(p[2])) {
+            ++p;
+            goto lex_integer;
+        }
+    case '.':
+    case '+': {
+        if (isDigit(p[1])) {
+            ++p;
+            goto lex_integer;
+        }
+    } // Fall through on purpose!
+    case ':': case '=': case '|':
+    case '(': case ')':
+    case '[': case ']':
+    case '<': case '>': {
+    lex_single_special:
+        ++p;
+        RETURN_TOKEN(TOK_SINGLE_SPECIAL)
+    } break;
+    case '~': {
+        if (p[1] != '/') {
+            goto lex_single_special;
+        }
+    } // Fall through on purpose!
+    case '/': {
+    lex_path:
+        while (isPath(*p)) {
+            ++p;
+        }
+        RETURN_TOKEN(TOK_PATH)
+    } break;
+    default: {
+        // Windows absolute paths start with 'A:/' or 'A:\'
+        if (isLetter(*p) && p[1] == ':' && (p[2] == '/' || p[2] == '\\')) {
+            goto lex_path;
+        }
+
+        while (isLetter(*p) || *p == '_') {
+            ++p;
+        }
+        RETURN_TOKEN(TOK_WORD)
+    } break;
+    }
+
+    return false;
+
+#undef RETURN_TOKEN
+}
+
+static void parseLine(LogLine* line) {
+    // go through line token by token, try to parse frame number, frame time, values and keywords.
+
+    Lexer lex;
+    memcpy(&lex.str, &line->str, sizeof(StrView));
+    lex.pos = lex.str.txt;
+
+    printf("parsing '%s':\n", line->str.txt);
+
+    // NOTE: If we need to backtrack while parsing,
+    // that should be rather easy, 
+    // i.e. store the lexers pos and restore it
+
+    while (nextToken(&lex)) {
+        printf("(%s): '%.*s'\n", tokenKindStrs[lex.tokenKind], lex.tokenStr.len, lex.tokenStr.txt);
+
+        if (lex.tokenStr.len == 0) {
+            assert(0 && "WHAT THE HELL=!=?");
+        }
+    }
+}
+
 #define _STR_(x) #x
 #define STR(x) _STR_(x)
 
@@ -154,6 +345,7 @@ static int writeOutput(FILE* file, Chars* textBuffer, LogLines* logLines) {
 
     return 0;
 
+#undef WRITE
 #undef ERROR
 #undef SEEK
 }
@@ -176,7 +368,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // -------------- Read Input -------------- //
+    //# -------------- Read Input -------------- #//
 
     char* fileName = argv[1];
 
@@ -209,6 +401,8 @@ int main(int argc, char** argv) {
             logLine->lineNum = lines + 1;
             logLine->str.txt = ca_commit_view(&textBuffer, lineView);
             logLine->str.len = lineView.len;
+
+            parseLine(logLine);
         }
 
         ++lines;
@@ -225,7 +419,7 @@ int main(int argc, char** argv) {
 
     // ca_dump(stdout, &textBuffer);
 
-    // -------------- Write Output -------------- //
+    //# -------------- Write Output -------------- #//
 
     const char* outputFileName = "out.buschla";
     printf("opening file '%s' for write\n", outputFileName);
