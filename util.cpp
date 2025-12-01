@@ -3,18 +3,21 @@
 #ifdef WINDOWS
 #define PATH_MAX 4096
 #include <direct.h>
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #else
 #include <unistd.h>
 #endif
 
 #include <assert.h>
 #include <limits.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
+#include <stdarg.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-#include <SDL3/SDL.h>
+//#include <SDL3/SDL.h>
 
 // FIXME: Maybe its nicer to have a util_linx.cpp and util_windows.cpp
 // which implement the platform variations of functions?
@@ -280,17 +283,36 @@ void hexdump(FILE* stream, void* memory, size_t size, size_t itemSize) {
 }
 
 #define TIMER_CLOCK_ID CLOCK_MONOTONIC_RAW
+#define NANOS_PER_SEC 1000000000
+// The maximum time span representable is 584 years.
+static uint64_t nanos_since_unspecified_epoch() {
+#ifdef WINDOWS
+    LARGE_INTEGER Time;
+    QueryPerformanceCounter(&Time);
+
+    static LARGE_INTEGER Frequency = { 0 };
+    if (Frequency.QuadPart == 0) {
+        QueryPerformanceFrequency(&Frequency);
+    }
+
+    uint64_t Secs = Time.QuadPart / Frequency.QuadPart;
+    uint64_t Nanos = Time.QuadPart % Frequency.QuadPart * NANOS_PER_SEC / Frequency.QuadPart;
+    return NANOS_PER_SEC * Secs + Nanos;
+#else
+    struct timespec ts;
+    clock_gettime(TIMER_CLOCK_ID, &ts);
+
+    return NANOS_PER_SEC * ts.tv_sec + ts.tv_nsec;
+#endif
+}
+
 bool timerBegin(Timer* t) {
-    // TODO: This dependency on SDL is really not nice!
-    // see https://www.youtube.com/watch?v=nRwGKqU5na0 for a cross platform nanosecond implementation!!!
-    t->begin = SDL_GetTicksNS();
+    t->begin = nanos_since_unspecified_epoch();
     return true;
 }
 
 bool timerEnd(Timer* t) {
-    // TODO: This dependency on SDL is really not nice!
-    // see https://www.youtube.com/watch?v=nRwGKqU5na0 for a cross platform nanosecond implementation!!!
-    t->end = SDL_GetTicksNS();
+    t->end = nanos_since_unspecified_epoch();
     long diffNano = t->end - t->begin;
     t->elapsedMs = diffNano * 1e-6f;
     return false;
