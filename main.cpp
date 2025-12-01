@@ -296,7 +296,7 @@ static void tryReloadAppLibrary(DirWatcherEvent* watcherEvent) {
     }
 
     unloadAppLibrary(&appLibrary);
-    runCmd(tmpf("rm "TMP_FILE_FMT, tmpDirPath, currentTmpLibraryIndex));
+    runCmd(tmpf("rm " TMP_FILE_FMT, tmpDirPath, currentTmpLibraryIndex));
 
     appLibrary.handle = newAppLibrary.handle;
     appLibrary.app_main = newAppLibrary.app_main;
@@ -417,7 +417,7 @@ int main(int argc, char** argv) {
     runCmd(tmpf("mkdir %s", tmpDirPath));
 
     currentTmpLibraryIndex = 0;
-    runCmd(tmpf("cp %s "TMP_FILE_FMT, appLibraryPath, tmpDirPath, currentTmpLibraryIndex));
+    runCmd(tmpf("cp %s " TMP_FILE_FMT, appLibraryPath, tmpDirPath, currentTmpLibraryIndex));
 
     tmp = tmpf(TMP_FILE_FMT, tmpDirPath, currentTmpLibraryIndex);
     if (!tryLoadAppLibrary(tmp, &appLibrary)) {
