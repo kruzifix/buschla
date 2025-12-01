@@ -18,6 +18,7 @@ COMPILER = g++
 
 CFLAGS =  -std=c++11
 CFLAGS += -ggdb
+#CFLAGS += -O3
 CFLAGS += -Wall
 CFLAGS += -DLINUX
 #CFLAGS += -Wformat
@@ -34,20 +35,24 @@ LINK = $(COMPILER) $(LDFLAGS)
 BUILD_DIR = ./build
 IMGUI_DIR = ./imgui
 
+EXE = $(BUILD_DIR)/buschla
 APP_LIB = $(BUILD_DIR)/app.so
+PARSER_EXE = $(BUILD_DIR)/buschla-parser
 
 ## ----------------------------- ##
 
-EXE = $(BUILD_DIR)/buschla
-
 .PHONY: all
-all: $(EXE) $(APP_LIB)
+all: $(EXE) $(APP_LIB) $(PARSER_EXE)
 	cp DroidSansMono.ttf $(BUILD_DIR)/font.ttf
 	@printf '\033[32;1mFinished building BUSCHLA!\033[0m\n'
 
 .PHONY: app
 app: $(APP_LIB)
-	@echo Finished building app library!
+	@printf '\033[32;1mFinished building BUSCHLA app lib!\033[0m\n'
+
+.PHONY: parser
+parser: $(PARSER_EXE)
+	@printf '\033[32;1mFinished building BUSCHLA parser!\033[0m\n'
 
 ## ----------------------------- ##
 
@@ -92,6 +97,7 @@ $(EXE_SRC_UNITY): $(EXE_SRC_FILES) | $(BUILD_DIR)
 
 APP_SRC = util
 APP_SRC += dynamic_array
+APP_SRC += buschla_file
 APP_SRC += app
 
 APP_SRC_UNITY = $(BUILD_DIR)/unity_app.cpp
@@ -110,6 +116,30 @@ $(APP_OBJ): $(APP_SRC_UNITY)
 # compose app unity source file
 $(APP_SRC_UNITY): $(APP_SRC_FILES) | $(BUILD_DIR)
 	@echo -e $(APP_SRC_INCLUDES) > $(APP_SRC_UNITY)
+
+## ----------------------------- ##
+
+PARSER_SRC += util
+#PARSER_SRC += directory_watcher
+PARSER_SRC += dynamic_array
+PARSER_SRC += parser
+
+PARSER_SRC_UNITY = $(BUILD_DIR)/unity_pars.cpp
+PARSER_SRC_FILES = $(PARSER_SRC:=.cpp)
+PARSER_SRC_INCLUDES = $(PARSER_SRC_FILES:%='\n#include "../%"')
+PARSER_OBJ = $(PARSER_EXE).o
+
+# link parser exe
+$(PARSER_EXE): $(PARSER_OBJ)
+	$(LINK) -o $(PARSER_EXE) $(PARSER_OBJ)
+
+# build parser exe .o file
+$(PARSER_OBJ): $(PARSER_SRC_UNITY)
+	$(COMPILE) -o $(PARSER_OBJ) $(PARSER_SRC_UNITY)
+
+# compose parser exe unity source file
+$(PARSER_SRC_UNITY): $(PARSER_SRC_FILES) | $(BUILD_DIR)
+	@echo -e $(PARSER_SRC_INCLUDES) > $(PARSER_SRC_UNITY)
 
 ## ----------------------------- ##
 
