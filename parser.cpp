@@ -8,15 +8,15 @@
 // We want to store:
 // - All of the text of the log lines
 // - Info per LogLine
-//      text ptr
-//      frameNumber
-//      time
-//      values?
+// text ptr
+// frameNumber
+// time
+// values?
 // - List of keywords, so we can filter
 // - For each value:
-//      meta, i.e. min, max, avg, ...
-//      array of actual values (one for each frame?)
-//      if a frame did not log this value, somehow store hat?
+// meta, i.e. min, max, avg, ...
+// array of actual values (one for each frame?)
+// if a frame did not log this value, somehow store hat?
 
 // NOTES: How do we best do filtering by keywords/values?
 // We assign each keyword an index
@@ -25,13 +25,13 @@
 // Maybe its better to store a list of indices ?
 // OR we could only store sections of the bitfield?
 
-
 // Returns pointer to statically allocated buffer.
 // DO NOT store this pointer!
 // DO NOT free this pointer!
 // The contents will be modified the next time fetchLine is called.
 // If an error occured while reading, NULL is returned instead.
-static char* fetchLine(FILE* stream, uint32_t* lengthOut) {
+static char* fetchLine(FILE* stream, uint32_t* lengthOut)
+{
     static char* buffer = NULL;
     static uint32_t capacity = 0;
 
@@ -100,56 +100,66 @@ static char* fetchLine(FILE* stream, uint32_t* lengthOut) {
 // TODO: DateTime
 
 typedef enum {
-#define X(x) x,
+ #define X(x) x,
     TOKEN_KINDS(X)
 #undef X
 } TokenKind;
 
 const char* tokenKindStrs[] = {
-#define X(x) #x,
+ #define X(x) #x,
     TOKEN_KINDS(X)
 #undef X
 };
 
 typedef struct {
+    TokenKind kind;
+    StrView str;
+} LexerToken;
+
+typedef struct {
     StrView str;
     const char* pos;
 
-    TokenKind tokenKind;
-    StrView tokenStr;
+    LexerToken token;
 } Lexer;
 
-static bool isWhiteSpace(char c) {
+static bool isWhiteSpace(char c)
+{
     return c == ' ' || c == '\t';
 }
 
-static bool isDigit(char c) {
+static bool isDigit(char c)
+{
     return c >= '0' && c <= '9';
 }
 
-static bool isHexDigit(char c) {
+static bool isHexDigit(char c)
+{
     return (c >= '0' && c <= '9') ||
-        (c >= 'a' && c <= 'f') ||
-        (c >= 'A' && c <= 'F');
+           (c >= 'a' && c <= 'f') ||
+           (c >= 'A' && c <= 'F');
 }
 
-static bool isLetter(char c) {
+static bool isLetter(char c)
+{
     return (c >= 'a' && c <= 'z') ||
-        (c >= 'A' && c <= 'Z');
+           (c >= 'A' && c <= 'Z');
 }
 
-static bool isPath(char c) {
+static bool isPath(char c)
+{
     return (c >= 'a' && c <= 'z') ||
-        (c >= 'A' && c <= 'Z') ||
-        c == ':' || c == '.' || c == '/' || c == '\\';
+           (c >= 'A' && c <= 'Z') ||
+           c == ':' || c == '.' || c == '/' || c == '\\';
 }
 
-static bool nextToken(Lexer* lex) {
-#define RETURN_TOKEN(kind) { \
-    lex->tokenKind = (kind); \
+static bool nextToken(Lexer* lex)
+{
+#define RETURN_TOKEN(_kind) { \
     lex->pos = p; \
-    lex->tokenStr.txt = tokenStart; \
-    lex->tokenStr.len = p - tokenStart; \
+    lex->token.kind = (_kind); \
+    lex->token.str.txt = tokenStart; \
+    lex->token.str.len = p - tokenStart; \
     return true; \
 }
 
@@ -180,10 +190,16 @@ static bool nextToken(Lexer* lex) {
             RETURN_TOKEN(TOK_BINARY)
         }
     } // Fall through on purpose!
-    case '1': case '2': case '3':
-    case '4': case '5': case '6':
-    case '7': case '8': case '9': {
-    lex_integer:
+    case '1':
+    case '2':
+    case '3':
+    case '4':
+    case '5':
+    case '6':
+    case '7':
+    case '8':
+    case '9': {
+lex_integer:
         while (isDigit(*p)) {
             ++p;
         }
@@ -199,7 +215,7 @@ static bool nextToken(Lexer* lex) {
             }
 
             if (*p == 'e' || *p == 'E') {
-            lex_float_exponent:
+lex_float_exponent:
                 ++p;
                 if (*p == '+' || *p == '-') {
                     ++p;
@@ -213,7 +229,8 @@ static bool nextToken(Lexer* lex) {
         }
 
         RETURN_TOKEN(TOK_INTEGER)
-    } break;
+    }
+    break;
     case '-':
         if (p[1] == '.' && isDigit(p[2])) {
             ++p;
@@ -226,26 +243,33 @@ static bool nextToken(Lexer* lex) {
             goto lex_integer;
         }
     } // Fall through on purpose!
-    case ':': case '=': case '|':
-    case '(': case ')':
-    case '[': case ']':
-    case '<': case '>': {
-    lex_single_special:
+    case ':':
+    case '=':
+    case '|':
+    case '(':
+    case ')':
+    case '[':
+    case ']':
+    case '<':
+    case '>': {
+lex_single_special:
         ++p;
         RETURN_TOKEN(TOK_SINGLE_SPECIAL)
-    } break;
+    }
+    break;
     case '~': {
         if (p[1] != '/') {
             goto lex_single_special;
         }
     } // Fall through on purpose!
     case '/': {
-    lex_path:
+lex_path:
         while (isPath(*p)) {
             ++p;
         }
         RETURN_TOKEN(TOK_PATH)
-    } break;
+    }
+    break;
     default: {
         // Windows absolute paths start with 'A:/' or 'A:\'
         if (isLetter(*p) && p[1] == ':' && (p[2] == '/' || p[2] == '\\')) {
@@ -256,7 +280,8 @@ static bool nextToken(Lexer* lex) {
             ++p;
         }
         RETURN_TOKEN(TOK_WORD)
-    } break;
+    }
+    break;
     }
 
     return false;
@@ -264,7 +289,8 @@ static bool nextToken(Lexer* lex) {
 #undef RETURN_TOKEN
 }
 
-static void parseLine(LogLine* line) {
+static void parseLine(LogLine* line)
+{
     // go through line token by token, try to parse frame number, frame time, values and keywords.
 
     Lexer lex;
@@ -273,23 +299,40 @@ static void parseLine(LogLine* line) {
 
     printf("parsing '%s':\n", line->str.txt);
 
-    // NOTE: If we need to backtrack while parsing,
-    // that should be rather easy, 
-    // i.e. store the lexers pos and restore it
+#define PARSER_TOKEN_LOOKBACK 5
+    LexerToken history[PARSER_TOKEN_LOOKBACK];
+    memset(history, 0, sizeof(history));
 
+    int historyHeadIndex = 0;
+#define GET_HISTORY_INDEX(i) ((historyHeadIndex + (i) + PARSER_TOKEN_LOOKBACK) % PARSER_TOKEN_LOOKBACK)
+#define HISTORY_TOKEN(i) history[GET_HISTORY_INDEX(i)]
     while (nextToken(&lex)) {
-        printf("(%s): '%.*s'\n", tokenKindStrs[lex.tokenKind], lex.tokenStr.len, lex.tokenStr.txt);
-
-        if (lex.tokenStr.len == 0) {
+        LexerToken currentToken = lex.token;
+        printf("(%s): '%.*s'\n", tokenKindStrs[currentToken.kind], currentToken.str.len, currentToken.str.txt);
+        if (lex.token.str.len == 0) {
             assert(0 && "WHAT THE HELL=!=?");
         }
+
+        history[historyHeadIndex] = currentToken;
+
+        LexerToken previousToken = HISTORY_TOKEN(-1);
+        LexerToken previousPreviousToken = HISTORY_TOKEN(-2);
+        if (currentToken.kind == TOK_INTEGER &&
+                previousToken.kind == TOK_SINGLE_SPECIAL &&
+                *previousToken.str.txt == ':' &&
+                previousPreviousToken.kind == TOK_WORD) {
+            printf("found value!\n'%.*s' = '%.*s'\n", previousPreviousToken.str.len, previousPreviousToken.str.txt, currentToken.str.len, currentToken.str.txt);
+        }
+
+        historyHeadIndex = (historyHeadIndex + 1) % PARSER_TOKEN_LOOKBACK;
     }
 }
 
 #define _STR_(x) #x
 #define STR(x) _STR_(x)
 
-static int writeOutput(FILE* file, Chars* textBuffer, LogLines* logLines) {
+static int writeOutput(FILE* file, Chars* textBuffer, LogLines* logLines)
+{
     // TODO: I like the structure that we have in tryLoadBuschlaFile, also implement WRITE properly and put it in a header file!
 #define ERROR(fmt, ...) fprintf(stderr, __FILE__ ":" STR(__LINE__) " " fmt, __VA_ARGS__)
 #define SEEK(pos) { int ret = fseek(file, (pos), SEEK_SET); if (ret != 0) { ERROR("fseek to %d failed. returned %d: %s\n", (pos), ret, strerror(ret)); return 105; } }
@@ -350,11 +393,13 @@ static int writeOutput(FILE* file, Chars* textBuffer, LogLines* logLines) {
 #undef SEEK
 }
 
-static void printUsage(int argc, char** argv) {
+static void printUsage(int argc, char** argv)
+{
     printf("Usage: %s <input file path>\n", argv[0]);
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv)
+{
     Timer timer;
     timerBegin(&timer);
 
@@ -392,6 +437,7 @@ int main(int argc, char** argv) {
         lineView.len = 0;
         lineView.txt = fetchLine(inputFile, &lineView.len);
 
+        // TODO: If first line is empty, then we parse nothing ?!
         if (lineView.txt == NULL) {
             break;
         }
@@ -443,20 +489,20 @@ int main(int argc, char** argv) {
 
     // #define OFFSET(st, m) ((size_t)&(((st*)0)->m))
     // #define MEMBER(st, m) printf("  %8ld: %s (%ld bytes)\n", OFFSET(st, m), #m, sizeof(st::m));
-    //     printf("LogLine (%ld bytes):\n", sizeof(LogLine));
-    //     MEMBER(LogLine, str);
-    //     MEMBER(LogLine, lineNum);
+    // printf("LogLine (%ld bytes):\n", sizeof(LogLine));
+    // MEMBER(LogLine, str);
+    // MEMBER(LogLine, lineNum);
 
-    //     printf("BuschlaFileHeader (%ld bytes):\n", sizeof(BuschlaFileHeader));
-    //     MEMBER(BuschlaFileHeader, magic);
-    //     MEMBER(BuschlaFileHeader, version);
-    //     MEMBER(BuschlaFileHeader, headerSize);
-    //     MEMBER(BuschlaFileHeader, totalSize);
-    //     MEMBER(BuschlaFileHeader, logLineCount);
-    //     MEMBER(BuschlaFileHeader, logLineStride);
-    //     MEMBER(BuschlaFileHeader, logLinesOffset);
-    //     MEMBER(BuschlaFileHeader, textBufferSize);
-    //     MEMBER(BuschlaFileHeader, textBufferOffset);
+    // printf("BuschlaFileHeader (%ld bytes):\n", sizeof(BuschlaFileHeader));
+    // MEMBER(BuschlaFileHeader, magic);
+    // MEMBER(BuschlaFileHeader, version);
+    // MEMBER(BuschlaFileHeader, headerSize);
+    // MEMBER(BuschlaFileHeader, totalSize);
+    // MEMBER(BuschlaFileHeader, logLineCount);
+    // MEMBER(BuschlaFileHeader, logLineStride);
+    // MEMBER(BuschlaFileHeader, logLinesOffset);
+    // MEMBER(BuschlaFileHeader, textBufferSize);
+    // MEMBER(BuschlaFileHeader, textBufferOffset);
 
     return exitCode;
 }
